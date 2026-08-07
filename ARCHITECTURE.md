@@ -268,8 +268,8 @@ uncertain stays `unknown`.
 | 4     | Public market & business intelligence collector | ✅ |
 | 5     | REST API (search/filter/sort/paginate/export endpoints) | ✅ (export arrives with Phase 8) |
 | 6     | Frontend dashboard (Next.js)               | ✅ |
-| 7     | Charts and analytics                       | pending |
-| 8     | Export system (CSV/Excel/JSON/Markdown)    | pending |
+| 7     | Charts and analytics                       | ✅ |
+| 8     | Export system (CSV/Excel/JSON/Markdown)    | ✅ |
 
 Each phase is committed before the next one starts.
 
