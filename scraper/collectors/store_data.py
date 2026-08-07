@@ -317,7 +317,7 @@ async def collect_one(
     return SyncStatus.DONE, "ok"
 
 
-async def run_store_collector(limit: int = 200, only_appid: int | None = None) -> dict:
+async def run_store_collector(limit: int = 0, only_appid: int | None = None) -> dict:
     async with make_session() as http:
         http.cookie_jar.update_cookies(AGE_GATE_COOKIES)
         details_client = SteamClient(http, min_interval=APPDETAILS_MIN_INTERVAL)

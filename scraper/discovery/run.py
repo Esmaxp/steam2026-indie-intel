@@ -24,8 +24,8 @@ def main() -> None:
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=500,
-        help="search mode: safety cap on pages per pass",
+        default=2000,
+        help="search mode: safety cap on pages per pass (2000 pages = 100k rows)",
     )
     args = parser.parse_args()
 

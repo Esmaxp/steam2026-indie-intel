@@ -265,7 +265,7 @@ uncertain stays `unknown`.
 | 1     | Architecture, folder structure, database schema, Docker Compose, FastAPI skeleton | ✅ this commit |
 | 2     | Steam discovery service (2026 indie games) | ✅ |
 | 3     | Steam data collector + classification      | ✅ |
-| 4     | Public market & business intelligence collector | pending |
+| 4     | Public market & business intelligence collector | ✅ |
 | 5     | REST API (search/filter/sort/paginate/export endpoints) | pending |
 | 6     | Frontend dashboard (Next.js)               | pending |
 | 7     | Charts and analytics                       | pending |

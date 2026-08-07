@@ -50,11 +50,16 @@ async def register_pending(session: AsyncSession, appids: list[int], stage: Sync
     return inserted
 
 
-async def pending_appids(session: AsyncSession, stage: SyncStage, limit: int) -> list[int]:
-    result = await session.execute(
+async def pending_appids(
+    session: AsyncSession, stage: SyncStage, limit: int | None = None
+) -> list[int]:
+    """Pending appids for a stage. limit=0/None means the whole queue."""
+    stmt = (
         select(SyncState.appid)
         .where(SyncState.stage == stage, SyncState.status == SyncStatus.PENDING)
         .order_by(SyncState.appid)
-        .limit(limit)
     )
+    if limit:
+        stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
     return [row[0] for row in result]

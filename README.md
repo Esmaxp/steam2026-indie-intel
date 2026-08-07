@@ -40,7 +40,8 @@ uvicorn app.main:app --reload
 1. ✅ Architecture & database
 2. ✅ Steam discovery service — `docker compose run --rm discovery` (see `scraper/README.md`)
 3. ✅ Steam data collector — `docker compose run --rm collector`
-4. Public market intelligence collector
+4. ✅ Public market intelligence collector — `docker compose run --rm market`
+   (or run the whole chain: `docker compose run --rm pipeline`)
 5. REST API
 6. Frontend dashboard
 7. Charts & analytics

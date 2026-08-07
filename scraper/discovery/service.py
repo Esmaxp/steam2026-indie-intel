@@ -67,7 +67,7 @@ async def upsert_game(session, appid: int, name: str, release: ParsedRelease,
     await register_pending(session, [appid], SyncStage.STORE_DATA)
 
 
-async def run_search_discovery(max_pages: int = 500) -> dict:
+async def run_search_discovery(max_pages: int = 2000) -> dict:
     """Fast discovery via Steam Search. Returns summary counters."""
     found = 0
     async with make_session() as http:

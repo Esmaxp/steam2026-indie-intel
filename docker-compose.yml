@@ -74,7 +74,52 @@ services:
         condition: service_healthy
     volumes:
       - ./logs:/data/logs
-    command: ["python", "-m", "scraper.collectors.run", "--limit", "200"]
+    command: ["python", "-m", "scraper.collectors.run"]  # processes the whole queue
+
+  # Phase 4 — run on demand:  docker compose run --rm market
+  market:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "scraper.collectors.run_market"]
+
+  # Full pipeline:  docker compose run --rm pipeline
+  # discovery → store data for ALL queued games → market data for ALL queued games
+  pipeline:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command:
+      - sh
+      - -c
+      - |
+        python -m scraper.discovery.run --mode search &&
+        python -m scraper.collectors.run &&
+        python -m scraper.collectors.run_market
 
   # frontend service is added in Phase 6 (Next.js on http://localhost:3000)
 

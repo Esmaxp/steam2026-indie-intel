@@ -9,8 +9,9 @@ from scraper.common.logging import setup_logging
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect full Steam store data (Phase 3)")
     parser.add_argument(
-        "--limit", type=int, default=200,
-        help="how many queued games to process this run (resumes automatically)",
+        "--limit", type=int, default=0,
+        help="max queued games this run; 0 = entire queue (default). "
+        "Interruptions are safe — progress is checkpointed per game.",
     )
     parser.add_argument("--appid", type=int, default=None, help="process a single AppID")
     args = parser.parse_args()

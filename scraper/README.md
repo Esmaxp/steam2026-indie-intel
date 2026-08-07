@@ -3,8 +3,12 @@
 AsyncIO scraping pipeline (Phases 2–4).
 
 - `discovery/` — ✅ Phase 2: Steam 2026 indie game discovery
-- `collectors/` — ✅ Phase 3: Steam store data collector (market/business data: Phase 4)
+- `collectors/` — ✅ Phase 3 store data + ✅ Phase 4 market/business data
 - `classifiers/` — ✅ Phase 3: dimension / camera / graphics style / engine
+
+**Fetch everything in one go:** `docker compose run --rm pipeline`
+(discovery → store data for the whole queue → market data for the whole
+queue; every step is checkpointed, so interrupting and re-running resumes).
 - `common/` — rate-limited retrying HTTP client, resume via `sync_states`, logging
 
 ## Discovery (Phase 2)
@@ -76,4 +80,31 @@ docker compose run --rm collector python -m scraper.collectors.run --limit 500
 docker compose run --rm collector python -m scraper.collectors.run --appid 123456
 ```
 
-Logs land in `logs/collector.log`.
+Logs land in `logs/collector.log`. Default `--limit 0` processes the entire
+queue (all discovered 2026 indie games).
+
+## Market & business data collector (Phase 4)
+
+Processes the `market_data` queue that the store collector filled. Per game:
+
+- **Steam appreviews API** — positive/negative/total reviews, review score
+  (authoritative Steam data)
+- **SteamCharts** — all-time peak CCU + last-30-days average CCU (public
+  aggregator; games without a chart simply stay NULL)
+- **Steam News API** — Steam Next Fest participation, recorded only when an
+  official news item mentions it (the news link is stored as the source)
+- **Gamalytic public API** — wishlist / copies sold / gross revenue / owners
+  **estimates**, stored append-only with `status = estimated` and source URL
+
+Provenance guarantees: Steam does not expose wishlist/revenue — those are
+only written when a public estimator provides a number, always flagged
+`estimated` with a source; nothing found = no record = Unknown in the UI.
+Review stats snapshots accumulate over time in `steam_stats` (append-only),
+so re-running the collector builds a history.
+
+```bash
+docker compose run --rm market
+docker compose run --rm market python -m scraper.collectors.run_market --appid 123456
+```
+
+Logs land in `logs/market.log`.
