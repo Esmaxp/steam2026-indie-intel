@@ -57,6 +57,25 @@ services:
     volumes:
       - ./logs:/data/logs
 
+  # Phase 3 — run on demand:  docker compose run --rm collector [--limit 500]
+  collector:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "scraper.collectors.run", "--limit", "200"]
+
   # frontend service is added in Phase 6 (Next.js on http://localhost:3000)
 
 volumes:

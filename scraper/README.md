@@ -3,8 +3,8 @@
 AsyncIO scraping pipeline (Phases 2–4).
 
 - `discovery/` — ✅ Phase 2: Steam 2026 indie game discovery
-- `collectors/` — Steam store data, public market data, business data (Phases 3–4)
-- `classifiers/` — dimension / camera / graphics style / engine (Phase 3)
+- `collectors/` — ✅ Phase 3: Steam store data collector (market/business data: Phase 4)
+- `classifiers/` — ✅ Phase 3: dimension / camera / graphics style / engine
 - `common/` — rate-limited retrying HTTP client, resume via `sync_states`, logging
 
 ## Discovery (Phase 2)
@@ -46,3 +46,34 @@ Logs land in `logs/discovery.log`; progress bars show live status.
 Rules: respect rate limits (search 1 req/s, appdetails 1 req/1.5 s), retry
 with exponential backoff on 429/5xx, resume where stopped, never fabricate
 data, AppID-keyed deduplication.
+
+## Store data collector (Phase 3)
+
+Processes the `store_data` queue that discovery filled. Per game it fetches:
+
+- **appdetails** — name, description, developers/publishers, release info,
+  early access (genre 70), genres, languages, prices, controller support,
+  header/capsule images, screenshots, movies, demo appid
+- **store page** — user tags with vote counts (parsed from `InitAppTagModal`)
+- **Deck compatibility report** — verified / playable / unsupported / unknown
+- **demo appdetails** — demo release date (a demo is its own Steam app)
+
+Classification (`classifiers/classify.py`) is rule-based from tags + store
+description + legal notice (engine detection: Unreal/Unity/Godot/GameMaker
+copyright lines). Anything without a clear signal stays **unknown**.
+
+Honesty notes: Steam page creation date and developer/publisher
+country/website are not exposed by Steam → left NULL for Phase 4 public-source
+enrichment. Launch price is only recorded when observed within 7 days of
+release. Games whose release moved out of 2026 (or lost the Indie genre) are
+removed and logged.
+
+Games that pass are queued for Phase 4 (`market_data`).
+
+```bash
+docker compose run --rm collector                    # 200 queued games
+docker compose run --rm collector python -m scraper.collectors.run --limit 500
+docker compose run --rm collector python -m scraper.collectors.run --appid 123456
+```
+
+Logs land in `logs/collector.log`.
