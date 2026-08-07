@@ -16,6 +16,7 @@ import {
   labelFor,
 } from "@/lib/format";
 import type { GameDetail, Provenanced } from "@/lib/types";
+import { StatsHistoryChart } from "@/components/stats-history-chart";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -273,6 +274,8 @@ export default function GamePage({
           </Card>
         </div>
       </div>
+
+      <StatsHistoryChart appid={game.appid} />
 
       {screenshots.length > 0 ? (
         <Card className="p-5">

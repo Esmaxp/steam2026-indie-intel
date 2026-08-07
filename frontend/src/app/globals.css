@@ -17,6 +17,9 @@
   --status-warn: #fab219;
   --status-critical: #d03b3b;
   --good-text: #006300;
+  /* chart series (validated palette slots 1–2) */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -31,6 +34,8 @@
     --hairline: rgba(255, 255, 255, 0.1);
     --accent: #3987e5;
     --good-text: #0ca30c;
+    --series-1: #3987e5;
+    --series-2: #d95926;
   }
 }
 

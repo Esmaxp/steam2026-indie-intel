@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import Dimension, Game
+from app.models import Dimension, Game, Genre, game_genres
+from app.schemas.charts import BreakdownPoint, ChartsOut, MonthPoint
 from app.schemas.game import AverageStat, DashboardSummary
 from app.services.games_query import (
     latest_revenue_sq,
@@ -48,4 +49,57 @@ async def summary(db: AsyncSession = Depends(get_db)) -> DashboardSummary:
         avg_reviews=await _avg(db, ls.c.total_reviews),
         avg_wishlist=await _avg(db, lw.c.wishlist_count),
         avg_revenue=await _avg(db, lr.c.gross_revenue_usd),
+    )
+
+
+async def _breakdown(db: AsyncSession, column) -> list[BreakdownPoint]:
+    rows = await db.execute(
+        sa.select(column, sa.func.count())
+        .select_from(Game)
+        .group_by(column)
+        .order_by(sa.func.count().desc())
+    )
+    return [
+        BreakdownPoint(
+            key=value.value if hasattr(value, "value") else str(value), count=count
+        )
+        for value, count in rows
+    ]
+
+
+@router.get("/charts", response_model=ChartsOut)
+async def charts(db: AsyncSession = Depends(get_db)) -> ChartsOut:
+    month = sa.extract("month", Game.release_date)
+    month_rows = await db.execute(
+        sa.select(
+            month.label("m"),
+            sa.func.count().filter(Game.is_released.is_(True)),
+            sa.func.count().filter(Game.is_released.is_(False)),
+        )
+        .where(Game.release_date.is_not(None))
+        .group_by(month)
+        .order_by(month)
+    )
+    releases_by_month = [
+        MonthPoint(month=int(m), released=released, upcoming=upcoming)
+        for m, released, upcoming in month_rows
+    ]
+
+    genre_rows = await db.execute(
+        sa.select(Genre.name, sa.func.count(game_genres.c.appid))
+        .join(game_genres, game_genres.c.genre_id == Genre.id)
+        # Every cataloged game is Indie by construction — showing it says nothing.
+        .where(Genre.name != "Indie")
+        .group_by(Genre.id, Genre.name)
+        .order_by(sa.func.count(game_genres.c.appid).desc())
+        .limit(10)
+    )
+    top_genres = [BreakdownPoint(key=name, count=count) for name, count in genre_rows]
+
+    return ChartsOut(
+        releases_by_month=releases_by_month,
+        by_dimension=await _breakdown(db, Game.dimension),
+        by_engine=await _breakdown(db, Game.engine),
+        by_graphics_style=await _breakdown(db, Game.graphics_style),
+        top_genres=top_genres,
     )
