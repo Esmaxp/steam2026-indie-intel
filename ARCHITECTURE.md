@@ -263,7 +263,7 @@ uncertain stays `unknown`.
 | Phase | Deliverable                              | Status |
 |-------|------------------------------------------|--------|
 | 1     | Architecture, folder structure, database schema, Docker Compose, FastAPI skeleton | ✅ this commit |
-| 2     | Steam discovery service (2026 indie games) | pending |
+| 2     | Steam discovery service (2026 indie games) | ✅ |
 | 3     | Steam data collector + classification      | pending |
 | 4     | Public market & business intelligence collector | pending |
 | 5     | REST API (search/filter/sort/paginate/export endpoints) | pending |

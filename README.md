@@ -38,7 +38,7 @@ uvicorn app.main:app --reload
 ## Project phases
 
 1. ✅ Architecture & database
-2. Steam discovery service
+2. ✅ Steam discovery service — `docker compose run --rm discovery` (see `scraper/README.md`)
 3. Steam data collector
 4. Public market intelligence collector
 5. REST API

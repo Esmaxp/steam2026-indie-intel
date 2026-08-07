@@ -33,6 +33,29 @@ services:
       - ./exports:/data/exports
       - ./logs:/data/logs
       - ./media:/data/media
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # Phase 2 — run on demand:  docker compose run --rm discovery [--mode applist --limit 1000]
+  discovery:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy   # ensures migrations were applied
+    volumes:
+      - ./logs:/data/logs
 
   # frontend service is added in Phase 6 (Next.js on http://localhost:3000)
 
