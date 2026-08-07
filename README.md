@@ -1,0 +1,47 @@
+# Steam 2026 Indie Intelligence Platform
+
+Automatically discovers, collects, classifies and analyses every Steam indie
+game released during 2026. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
+plan, database schema and roadmap.
+
+## Data honesty
+
+Steam does **not** expose wishlist, revenue or budget numbers. Every such
+value in this platform is stored with a provenance status —
+**Confirmed / Estimated / Unknown** — and a public source. Data is never
+fabricated.
+
+## Quick start
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+- PostgreSQL → `localhost:5432`
+- Backend API → http://localhost:8000 (docs at `/docs`, health at `/health`)
+- Frontend dashboard → http://localhost:3000 (arrives in Phase 6)
+
+Migrations run automatically when the backend container starts.
+
+## Local development (without Docker)
+
+```bash
+cd backend
+python -m venv .venv && .venv\Scripts\activate   # Windows
+pip install -e .
+# point DATABASE_URL at a running PostgreSQL, then:
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+## Project phases
+
+1. ✅ Architecture & database
+2. Steam discovery service
+3. Steam data collector
+4. Public market intelligence collector
+5. REST API
+6. Frontend dashboard
+7. Charts & analytics
+8. Export system
