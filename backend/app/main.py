@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.api.v1 import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db.session import engine
@@ -36,6 +37,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(api_router, prefix="/api/v1")
+
 
 @app.get("/health", tags=["system"])
 async def health() -> dict:
@@ -52,7 +55,14 @@ async def health() -> dict:
 async def root() -> dict:
     return {
         "name": settings.app_name,
-        "phase": "1 — architecture & database",
         "docs": "/docs",
-        "api": "/api/v1 (arrives in Phase 5)",
+        "api": "/api/v1",
+        "endpoints": [
+            "/api/v1/games",
+            "/api/v1/games/{appid}",
+            "/api/v1/games/{appid}/stats",
+            "/api/v1/dashboard/summary",
+            "/api/v1/filters/options",
+            "/api/v1/filters/companies",
+        ],
     }

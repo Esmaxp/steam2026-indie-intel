@@ -98,7 +98,7 @@ class Game(Base, TimestampMixin):
         secondary=game_genres, back_populates="games"
     )
     tags: Mapped[list["Tag"]] = relationship(  # noqa: F821
-        secondary=game_tags, back_populates="games"
+        secondary=game_tags, back_populates="games", order_by=game_tags.c.rank
     )
     festivals: Mapped[list["Festival"]] = relationship(  # noqa: F821
         secondary=game_festivals, back_populates="games"

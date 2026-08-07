@@ -266,7 +266,7 @@ uncertain stays `unknown`.
 | 2     | Steam discovery service (2026 indie games) | ✅ |
 | 3     | Steam data collector + classification      | ✅ |
 | 4     | Public market & business intelligence collector | ✅ |
-| 5     | REST API (search/filter/sort/paginate/export endpoints) | pending |
+| 5     | REST API (search/filter/sort/paginate/export endpoints) | ✅ (export arrives with Phase 8) |
 | 6     | Frontend dashboard (Next.js)               | pending |
 | 7     | Charts and analytics                       | pending |
 | 8     | Export system (CSV/Excel/JSON/Markdown)    | pending |
