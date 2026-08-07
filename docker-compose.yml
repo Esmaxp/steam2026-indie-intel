@@ -121,7 +121,17 @@ services:
         python -m scraper.collectors.run &&
         python -m scraper.collectors.run_market
 
-  # frontend service is added in Phase 6 (Next.js on http://localhost:3000)
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
 
 volumes:
   pgdata:

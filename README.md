@@ -43,6 +43,6 @@ uvicorn app.main:app --reload
 4. ✅ Public market intelligence collector — `docker compose run --rm market`
    (or run the whole chain: `docker compose run --rm pipeline`)
 5. ✅ REST API — http://localhost:8000/docs (`/api/v1/games`, dashboard, filters)
-6. Frontend dashboard
+6. ✅ Frontend dashboard — http://localhost:3000 (`cd frontend && npm run dev` locally)
 7. Charts & analytics
 8. Export system

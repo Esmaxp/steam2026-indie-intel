@@ -1,0 +1,34 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import Providers from "@/app/providers";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Steam 2026 Indie Intelligence",
+  description:
+    "Every Steam indie game released during 2026 — discovered, classified and analysed. " +
+    "Business metrics are always marked Confirmed, Estimated or Unknown.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body className="font-sans antialiased">
+        <Providers>
+          <header className="border-b border-hairline bg-surface">
+            <div className="mx-auto flex max-w-[1400px] items-center gap-4 px-6 py-4">
+              <Link href="/" className="text-lg font-semibold tracking-tight">
+                Steam 2026 <span className="text-accent">Indie Intelligence</span>
+              </Link>
+              <span className="ml-auto text-xs text-muted">
+                Wishlist &amp; revenue are never exposed by Steam — values are
+                Confirmed / Estimated / Unknown, with sources.
+              </span>
+            </div>
+          </header>
+          <main className="mx-auto max-w-[1400px] px-6 py-6">{children}</main>
+        </Providers>
+      </body>
+    </html>
+  );
+}

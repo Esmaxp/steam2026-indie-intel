@@ -25,6 +25,14 @@ class RetryableHTTPError(Exception):
     """429 / 5xx — worth retrying with backoff."""
 
 
+class NonRetryableHTTPError(Exception):
+    """Other 4xx — the server said no; retrying won't change that."""
+
+    def __init__(self, status: int, url: str):
+        self.status = status
+        super().__init__(f"HTTP {status} for {url}")
+
+
 class SteamClient:
     """One instance per rate-limit domain. Serializes requests with a minimum
     interval between them, retries transient failures with exponential backoff."""
@@ -56,7 +64,8 @@ class SteamClient:
         async with self.session.get(url, params=params) as resp:
             if resp.status == 429 or resp.status >= 500:
                 raise RetryableHTTPError(f"HTTP {resp.status} for {resp.url}")
-            resp.raise_for_status()
+            if resp.status >= 400:
+                raise NonRetryableHTTPError(resp.status, str(resp.url))
             return await resp.text()
 
     async def get_json(self, url: str, params: dict | None = None) -> dict:
@@ -64,8 +73,8 @@ class SteamClient:
         return json.loads(text)
 
 
-def make_session() -> aiohttp.ClientSession:
+def make_session(user_agent: str = USER_AGENT) -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
-        headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
+        headers={"User-Agent": user_agent, "Accept-Language": "en-US,en;q=0.9"},
         timeout=aiohttp.ClientTimeout(total=60),
     )

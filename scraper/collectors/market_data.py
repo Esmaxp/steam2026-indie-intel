@@ -56,6 +56,38 @@ GAMALYTIC_MIN_INTERVAL = 2.0
 
 NEXT_FEST_NAME = "Steam Next Fest"
 
+# Some public sources sit behind WAFs that reject non-browser user agents.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+
+class SourceBreaker:
+    """Stops hammering a source that keeps refusing us (e.g. WAF 403s).
+
+    After `threshold` consecutive failures the source is skipped for the rest
+    of the run — its values simply stay Unknown instead of costing time."""
+
+    def __init__(self, name: str, threshold: int = 3):
+        self.name = name
+        self.threshold = threshold
+        self.failures = 0
+        self.open = False
+
+    def record_success(self) -> None:
+        self.failures = 0
+
+    def record_failure(self) -> None:
+        self.failures += 1
+        if self.failures >= self.threshold and not self.open:
+            self.open = True
+            logger.warning(
+                "Source %s disabled for this run after %d consecutive failures "
+                "(its values stay Unknown)",
+                self.name, self.failures,
+            )
+
 
 async def _ensure_next_fest(db: AsyncSession) -> int:
     stmt = pg_insert(Festival).values(name=NEXT_FEST_NAME, is_next_fest=True)
@@ -71,6 +103,7 @@ async def collect_one(
     charts_client: SteamClient,
     gamalytic_client: SteamClient,
     appid: int,
+    gamalytic_breaker: SourceBreaker,
 ) -> tuple[SyncStatus, str]:
     game = (
         await db.execute(sa.select(Game.is_released).where(Game.appid == appid))
@@ -94,12 +127,15 @@ async def collect_one(
         except (Exception, RetryError) as exc:
             logger.debug("SteamCharts unavailable for %s: %s", appid, exc)
 
-    # 3. Gamalytic estimates.
+    # 3. Gamalytic estimates (skipped entirely once the breaker opens).
     estimates = None
-    try:
-        estimates = await fetch_gamalytic(gamalytic_client, appid)
-    except Exception as exc:
-        logger.debug("Gamalytic unavailable for %s: %s", appid, exc)
+    if not gamalytic_breaker.open:
+        try:
+            estimates = await fetch_gamalytic(gamalytic_client, appid)
+            gamalytic_breaker.record_success()
+        except Exception as exc:
+            gamalytic_breaker.record_failure()
+            logger.debug("Gamalytic unavailable for %s: %s", appid, exc)
 
     # 4. Next Fest mentions from official Steam news.
     mentions = []
@@ -184,10 +220,11 @@ async def collect_one(
 
 
 async def run_market_collector(limit: int = 0, only_appid: int | None = None) -> dict:
-    async with make_session() as http:
+    gamalytic_breaker = SourceBreaker("gamalytic.com")
+    async with make_session() as http, make_session(BROWSER_UA) as browser_http:
         steam_client = SteamClient(http, min_interval=STEAM_MIN_INTERVAL)
-        charts_client = SteamClient(http, min_interval=CHARTS_MIN_INTERVAL)
-        gamalytic_client = SteamClient(http, min_interval=GAMALYTIC_MIN_INTERVAL)
+        charts_client = SteamClient(browser_http, min_interval=CHARTS_MIN_INTERVAL)
+        gamalytic_client = SteamClient(browser_http, min_interval=GAMALYTIC_MIN_INTERVAL)
 
         async with async_session_factory() as db:
             if only_appid is not None:
@@ -200,7 +237,8 @@ async def run_market_collector(limit: int = 0, only_appid: int | None = None) ->
             for appid in tqdm(queue, desc="market data", unit="game"):
                 try:
                     status, reason = await collect_one(
-                        db, steam_client, charts_client, gamalytic_client, appid
+                        db, steam_client, charts_client, gamalytic_client, appid,
+                        gamalytic_breaker,
                     )
                 except Exception as exc:
                     status, reason = SyncStatus.FAILED, str(exc)[:500]
