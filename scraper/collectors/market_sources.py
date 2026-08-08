@@ -12,6 +12,7 @@ or invented.
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -175,8 +176,16 @@ def extract_gamalytic(data: dict, appid: int) -> GamalyticEstimates:
 
 
 async def fetch_gamalytic(client: SteamClient, appid: int) -> GamalyticEstimates | None:
-    """Public estimates — recorded strictly as status=estimated with source."""
-    data = await client.get_json(GAMALYTIC_URL.format(appid=appid))
+    """Estimates — recorded strictly as status=estimated with source.
+
+    As of August 2026 the Gamalytic API requires an API key (paid plans).
+    Set GAMALYTIC_API_KEY to enable this source; without it, requests 403
+    and wishlist/revenue honestly stay Unknown."""
+    params = None
+    api_key = os.environ.get("GAMALYTIC_API_KEY", "").strip()
+    if api_key:
+        params = {"api_key": api_key}
+    data = await client.get_json(GAMALYTIC_URL.format(appid=appid), params=params)
     if not isinstance(data, dict) or data.get("error"):
         return None
     return extract_gamalytic(data, appid)

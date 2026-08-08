@@ -223,7 +223,11 @@ async def run_market_collector(limit: int = 0, only_appid: int | None = None) ->
     gamalytic_breaker = SourceBreaker("gamalytic.com")
     async with make_session() as http, make_session(BROWSER_UA) as browser_http:
         steam_client = SteamClient(http, min_interval=STEAM_MIN_INTERVAL)
-        charts_client = SteamClient(browser_http, min_interval=CHARTS_MIN_INTERVAL)
+        # SteamCharts answers 500 for games it has no chart for — retrying six
+        # times per missing game would burn ~2 minutes each, so cap at 2.
+        charts_client = SteamClient(
+            browser_http, min_interval=CHARTS_MIN_INTERVAL, max_attempts=2
+        )
         gamalytic_client = SteamClient(browser_http, min_interval=GAMALYTIC_MIN_INTERVAL)
 
         async with async_session_factory() as db:

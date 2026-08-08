@@ -7,8 +7,8 @@ import time
 
 import aiohttp
 from tenacity import (
+    AsyncRetrying,
     before_sleep_log,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
@@ -37,9 +37,15 @@ class SteamClient:
     """One instance per rate-limit domain. Serializes requests with a minimum
     interval between them, retries transient failures with exponential backoff."""
 
-    def __init__(self, session: aiohttp.ClientSession, min_interval: float = 1.0):
+    def __init__(
+        self,
+        session: aiohttp.ClientSession,
+        min_interval: float = 1.0,
+        max_attempts: int = 6,
+    ):
         self.session = session
         self.min_interval = min_interval
+        self.max_attempts = max_attempts
         self._lock = asyncio.Lock()
         self._last_request = 0.0
 
@@ -50,16 +56,7 @@ class SteamClient:
                 await asyncio.sleep(wait)
             self._last_request = time.monotonic()
 
-    @retry(
-        retry=retry_if_exception_type(
-            (RetryableHTTPError, aiohttp.ClientError, asyncio.TimeoutError)
-        ),
-        wait=wait_exponential_jitter(initial=2, max=60),
-        stop=stop_after_attempt(6),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True,
-    )
-    async def get_text(self, url: str, params: dict | None = None) -> str:
+    async def _fetch(self, url: str, params: dict | None) -> str:
         await self._throttle()
         async with self.session.get(url, params=params) as resp:
             if resp.status == 429 or resp.status >= 500:
@@ -67,6 +64,20 @@ class SteamClient:
             if resp.status >= 400:
                 raise NonRetryableHTTPError(resp.status, str(resp.url))
             return await resp.text()
+
+    async def get_text(self, url: str, params: dict | None = None) -> str:
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type(
+                (RetryableHTTPError, aiohttp.ClientError, asyncio.TimeoutError)
+            ),
+            wait=wait_exponential_jitter(initial=2, max=60),
+            stop=stop_after_attempt(self.max_attempts),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        ):
+            with attempt:
+                return await self._fetch(url, params)
+        raise RuntimeError("unreachable")  # AsyncRetrying always returns or raises
 
     async def get_json(self, url: str, params: dict | None = None) -> dict:
         text = await self.get_text(url, params=params)
