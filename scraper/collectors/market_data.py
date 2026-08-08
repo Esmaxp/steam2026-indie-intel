@@ -46,6 +46,7 @@ from scraper.collectors.market_sources import (
     fetch_next_fest_mentions,
     fetch_review_summary,
 )
+from scraper.collectors.revenue_merge import merge_estimates
 from scraper.collectors.steamspy_source import fetch_steamspy
 from scraper.collectors.vginsights_source import fetch_vginsights, robots_allows_games
 from scraper.common.http import SteamClient, make_session
@@ -265,6 +266,25 @@ async def collect_one(
         )
     for row in run_estimates:
         db.add(row)
+
+    # Summary view: Confirmed wins; otherwise median of the estimates, with
+    # status=conflicting when sources disagree by more than 50%.
+    merged = merge_estimates(run_estimates)
+    if merged is not None:
+        db.add(
+            RevenueRecord(
+                appid=appid,
+                status=merged.status,
+                gross_revenue_usd=merged.gross_revenue_usd,
+                estimated_sales=merged.estimated_sales,
+                estimated_owners_min=merged.owners_min,
+                estimated_owners_max=merged.owners_max,
+                estimate_spread=merged.estimate_spread,
+                source_name=merged.source_name,
+                source_url=merged.source_url,
+                notes=merged.notes,
+            )
+        )
 
     if mentions:
         festival_id = await _ensure_next_fest(db)

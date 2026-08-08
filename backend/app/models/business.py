@@ -36,6 +36,36 @@ class WishlistRecord(Base):
     game: Mapped["Game"] = relationship(back_populates="wishlist_records")  # noqa: F821
 
 
+class RevenueEstimate(Base):
+    """One row per (game, source) collection — the raw multi-source layer.
+
+    RevenueRecord remains the primary/summary view; it is now derived from
+    these rows (Confirmed wins; otherwise the median of Estimated values,
+    with status=conflicting when sources spread more than 50%)."""
+
+    __tablename__ = "revenue_estimates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    appid: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("games.appid", ondelete="CASCADE"), index=True
+    )
+    source_name: Mapped[str] = mapped_column(Text)  # gamalytic|steamspy|vginsights|disclosed
+    status: Mapped[DataStatus] = mapped_column(
+        pg_enum(DataStatus, "data_status"), default=DataStatus.ESTIMATED
+    )
+    revenue_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    estimated_sales: Mapped[int | None] = mapped_column(BigInteger)
+    owners_min: Mapped[int | None] = mapped_column(BigInteger)
+    owners_max: Mapped[int | None] = mapped_column(BigInteger)
+    wishlist_count: Mapped[int | None] = mapped_column(BigInteger)
+    source_url: Mapped[str] = mapped_column(Text)
+    retrieved_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    game: Mapped["Game"] = relationship()  # noqa: F821
+
+
 class RevenueRecord(Base):
     __tablename__ = "revenue_records"
 
@@ -51,6 +81,8 @@ class RevenueRecord(Base):
     estimated_sales: Mapped[int | None] = mapped_column(BigInteger)
     estimated_owners_min: Mapped[int | None] = mapped_column(BigInteger)
     estimated_owners_max: Mapped[int | None] = mapped_column(BigInteger)
+    # (max-min)/median across the sources merged into this summary row.
+    estimate_spread: Mapped[float | None] = mapped_column(Numeric(6, 3))
     source_name: Mapped[str | None] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(Text)
     recorded_at: Mapped[datetime.datetime] = mapped_column(
