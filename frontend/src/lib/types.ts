@@ -1,6 +1,6 @@
 /** Mirrors the FastAPI response schemas (backend/app/schemas). */
 
-export type DataStatus = "confirmed" | "estimated" | "unknown";
+export type DataStatus = "confirmed" | "estimated" | "unknown" | "conflicting";
 
 export interface Provenanced {
   value: number | null;
@@ -8,6 +8,19 @@ export interface Provenanced {
   source_name: string | null;
   source_url: string | null;
   recorded_at: string | null;
+  estimate_spread: number | null;
+}
+
+export interface RevenueEstimateOut {
+  source_name: string;
+  status: DataStatus;
+  revenue_usd: number | null;
+  estimated_sales: number | null;
+  owners_min: number | null;
+  owners_max: number | null;
+  wishlist_count: number | null;
+  source_url: string;
+  retrieved_at: string;
 }
 
 export interface GameListItem {
@@ -33,6 +46,8 @@ export interface GameListItem {
   camera: string;
   graphics_style: string;
   engine: string;
+  indie_confidence: "high" | "medium" | "low";
+  low_quality_signal: boolean;
   is_free: boolean;
   currency: string | null;
   current_price_cents: number | null;
@@ -101,6 +116,7 @@ export interface RevenueRecordOut {
   estimated_sales: number | null;
   estimated_owners_min: number | null;
   estimated_owners_max: number | null;
+  estimate_spread: number | null;
   source_name: string | null;
   source_url: string | null;
   recorded_at: string;
@@ -134,7 +150,20 @@ export interface GameDetail extends GameListItem {
   latest_stats: StatsPoint | null;
   wishlist_history: WishlistRecordOut[];
   revenue_history: RevenueRecordOut[];
+  revenue_estimates: RevenueEstimateOut[];
+  budget_estimates: BudgetEstimateOut[];
   marketing: MarketingOut | null;
+}
+
+export interface BudgetEstimateOut {
+  method: "team_cost" | "revenue_ratio";
+  budget_min_usd: number | null;
+  budget_max_usd: number | null;
+  formula: string;
+  inputs: Record<string, string | number>;
+  source_name: string | null;
+  source_url: string | null;
+  computed_at: string;
 }
 
 export interface Page<T> {

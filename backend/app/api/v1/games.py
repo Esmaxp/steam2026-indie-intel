@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.serializers import build_detail, row_to_list_item, stats_point
 from app.db.session import get_db
 from app.models import (
+    BudgetEstimate,
     Camera,
     DataStatus,
     Dimension,
@@ -16,6 +17,7 @@ from app.models import (
     GameEngine,
     GraphicsStyle,
     IndieConfidence,
+    RevenueEstimate,
     RevenueRecord,
     SteamStats,
     Tag,
@@ -176,9 +178,33 @@ async def get_game(appid: int, db: AsyncSession = Depends(get_db)) -> GameDetail
         .all()
     )
 
+    revenue_estimates = (
+        (
+            await db.execute(
+                sa.select(RevenueEstimate)
+                .where(RevenueEstimate.appid == appid)
+                .order_by(RevenueEstimate.retrieved_at.desc(), RevenueEstimate.source_name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    budget_estimates = (
+        (
+            await db.execute(
+                sa.select(BudgetEstimate)
+                .where(BudgetEstimate.appid == appid)
+                .order_by(BudgetEstimate.method)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     return build_detail(
         row_to_list_item(row), game, tag_rows, festival_rows, latest,
-        wishlist_history, revenue_history,
+        wishlist_history, revenue_history, revenue_estimates, budget_estimates,
     )
 
 

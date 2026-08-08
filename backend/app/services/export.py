@@ -63,6 +63,7 @@ def _flatten(item: GameListItem) -> dict:
         "revenue_usd": item.revenue.value,
         "revenue_status": item.revenue.status,
         "revenue_source": item.revenue.source_name,
+        "revenue_estimate_spread": item.revenue.estimate_spread,
         "estimated_sales": item.estimated_sales,
         "budget_usd": item.budget.value,
         "budget_status": item.budget.status,

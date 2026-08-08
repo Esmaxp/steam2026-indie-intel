@@ -126,6 +126,7 @@ def build_games_query(f: GameFilters) -> GamesQuery:
             lw.c.recorded_at.label("wishlist_recorded_at"),
             lr.c.gross_revenue_usd.label("revenue_gross"),
             lr.c.estimated_sales.label("estimated_sales"),
+            lr.c.estimate_spread.label("revenue_spread"),
             lr.c.status.label("revenue_status"),
             lr.c.source_name.label("revenue_source"),
             lr.c.source_url.label("revenue_source_url"),

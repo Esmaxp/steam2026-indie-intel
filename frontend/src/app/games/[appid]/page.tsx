@@ -47,6 +47,11 @@ function ProvenancedFact({
           {money ? fmtMoney(data.value) : fmtCompact(data.value)}
         </span>
         <StatusBadge status={data.status} />
+        {data.estimate_spread !== null && data.estimate_spread !== undefined ? (
+          <span className="text-xs text-muted">
+            spread {(data.estimate_spread * 100).toFixed(0)}% between sources
+          </span>
+        ) : null}
         {data.source_name ? (
           data.source_url ? (
             <a
@@ -231,7 +236,92 @@ export default function GamePage({
               </Fact>
               <ProvenancedFact label="Budget" data={game.budget} money />
             </div>
+            {game.budget_estimates.length > 0 ? (
+              <details className="mt-3 border-t border-grid pt-3">
+                <summary className="cursor-pointer text-xs font-medium text-accent">
+                  How was the budget estimated?
+                </summary>
+                <div className="mt-2 flex flex-col gap-3">
+                  {game.budget_estimates.map((estimate, i) => (
+                    <div key={i} className="rounded-md border border-hairline p-3 text-xs">
+                      <div className="font-medium">
+                        {estimate.method === "team_cost"
+                          ? "Method A — team size × duration × regional cost"
+                          : "Method B — industry revenue-to-budget ratio"}
+                        :{" "}
+                        <span className="tabular-nums">
+                          {estimate.budget_min_usd === estimate.budget_max_usd
+                            ? fmtMoney(estimate.budget_min_usd)
+                            : `${fmtMoney(estimate.budget_min_usd)} – ${fmtMoney(estimate.budget_max_usd)}`}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-muted">
+                        Formula: <code>{estimate.formula}</code>
+                      </div>
+                      <ul className="mt-1 text-muted">
+                        {Object.entries(estimate.inputs).map(([key, value]) => (
+                          <li key={key}>
+                            {key}: <span className="text-ink2">{String(value)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-1 text-muted">
+                        This is an explicitly labeled heuristic — not a fact.
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </Card>
+
+          {game.revenue_estimates.length > 0 ? (
+            <Card className="p-5">
+              <h2 className="mb-3 text-sm font-medium text-muted">
+                Estimate sources (each with link + date)
+              </h2>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-grid text-left text-muted">
+                    <th className="py-1 pr-2">Source</th>
+                    <th className="py-1 pr-2">Revenue</th>
+                    <th className="py-1 pr-2">Sales</th>
+                    <th className="py-1">Owners</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {game.revenue_estimates.map((estimate, i) => (
+                    <tr key={i} className="border-b border-grid/60 last:border-0">
+                      <td className="py-1.5 pr-2">
+                        <a
+                          href={estimate.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-accent hover:underline"
+                        >
+                          {estimate.source_name}
+                        </a>
+                        <span className="ml-1 text-muted">
+                          {new Date(estimate.retrieved_at).toLocaleDateString("en-GB")}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-2 tabular-nums">
+                        {fmtMoney(estimate.revenue_usd)}
+                      </td>
+                      <td className="py-1.5 pr-2 tabular-nums">
+                        {fmtCompact(estimate.estimated_sales)}
+                      </td>
+                      <td className="py-1.5 tabular-nums">
+                        {estimate.owners_min !== null || estimate.owners_max !== null
+                          ? `${fmtCompact(estimate.owners_min)}–${fmtCompact(estimate.owners_max)}`
+                          : DASH}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          ) : null}
 
           <Card className="p-5">
             <h2 className="mb-3 text-sm font-medium text-muted">Review statistics</h2>

@@ -96,6 +96,19 @@ class GameListItem(BaseModel):
     budget: Provenanced = Provenanced()
 
 
+class BudgetEstimateOut(BaseModel):
+    """One heuristic budget estimate with its full audit trail."""
+
+    method: str  # team_cost | revenue_ratio
+    budget_min_usd: float | None = None
+    budget_max_usd: float | None = None
+    formula: str
+    inputs: dict
+    source_name: str | None = None
+    source_url: str | None = None
+    computed_at: datetime.datetime
+
+
 class MarketingOut(BaseModel):
     budget: Provenanced = Provenanced()
     marketing_notes: str | None = None
@@ -120,10 +133,25 @@ class RevenueRecordOut(BaseModel):
     estimated_sales: int | None = None
     estimated_owners_min: int | None = None
     estimated_owners_max: int | None = None
+    estimate_spread: float | None = None
     source_name: str | None = None
     source_url: str | None = None
     recorded_at: datetime.datetime
     notes: str | None = None
+
+
+class RevenueEstimateOut(BaseModel):
+    """One raw estimate from one source — always with link and date."""
+
+    source_name: str
+    status: str
+    revenue_usd: float | None = None
+    estimated_sales: int | None = None
+    owners_min: int | None = None
+    owners_max: int | None = None
+    wishlist_count: int | None = None
+    source_url: str
+    retrieved_at: datetime.datetime
 
 
 class GameDetail(GameListItem):
@@ -146,6 +174,8 @@ class GameDetail(GameListItem):
     latest_stats: StatsPoint | None = None
     wishlist_history: list[WishlistRecordOut] = []
     revenue_history: list[RevenueRecordOut] = []
+    revenue_estimates: list[RevenueEstimateOut] = []
+    budget_estimates: list[BudgetEstimateOut] = []
     marketing: MarketingOut | None = None
 
 

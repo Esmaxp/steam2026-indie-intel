@@ -3,12 +3,14 @@
 from app.models import Game
 from app.schemas.common import Provenanced
 from app.schemas.game import (
+    BudgetEstimateOut,
     CompanyOut,
     FestivalOut,
     GameDetail,
     GameListItem,
     MarketingOut,
     MediaOut,
+    RevenueEstimateOut,
     RevenueRecordOut,
     StatsPoint,
     TagOut,
@@ -22,13 +24,16 @@ def _enum_value(value) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
-def _provenanced(value, status, source_name=None, source_url=None, recorded_at=None) -> Provenanced:
+def _provenanced(
+    value, status, source_name=None, source_url=None, recorded_at=None, spread=None
+) -> Provenanced:
     return Provenanced(
         value=float(value) if value is not None else None,
         status=_enum_value(status) if status is not None else "unknown",
         source_name=source_name,
         source_url=source_url,
         recorded_at=recorded_at,
+        estimate_spread=float(spread) if spread is not None else None,
     )
 
 
@@ -75,6 +80,7 @@ def row_to_list_item(row) -> GameListItem:
         revenue=_provenanced(
             row.revenue_gross, row.revenue_status, row.revenue_source,
             row.revenue_source_url, row.revenue_recorded_at,
+            spread=row.revenue_spread,
         ),
         estimated_sales=row.estimated_sales,
         budget=_provenanced(
@@ -117,6 +123,8 @@ def build_detail(
     latest,
     wishlist_history,
     revenue_history,
+    revenue_estimates=(),
+    budget_estimates=(),
 ) -> GameDetail:
     marketing = None
     if game.marketing_info is not None:
@@ -188,12 +196,42 @@ def build_detail(
                 estimated_sales=r.estimated_sales,
                 estimated_owners_min=r.estimated_owners_min,
                 estimated_owners_max=r.estimated_owners_max,
+                estimate_spread=(
+                    float(r.estimate_spread) if r.estimate_spread is not None else None
+                ),
                 source_name=r.source_name,
                 source_url=r.source_url,
                 recorded_at=r.recorded_at,
                 notes=r.notes,
             )
             for r in revenue_history
+        ],
+        revenue_estimates=[
+            RevenueEstimateOut(
+                source_name=e.source_name,
+                status=_enum_value(e.status),
+                revenue_usd=float(e.revenue_usd) if e.revenue_usd is not None else None,
+                estimated_sales=e.estimated_sales,
+                owners_min=e.owners_min,
+                owners_max=e.owners_max,
+                wishlist_count=e.wishlist_count,
+                source_url=e.source_url,
+                retrieved_at=e.retrieved_at,
+            )
+            for e in revenue_estimates
+        ],
+        budget_estimates=[
+            BudgetEstimateOut(
+                method=b.method,
+                budget_min_usd=float(b.budget_min_usd) if b.budget_min_usd is not None else None,
+                budget_max_usd=float(b.budget_max_usd) if b.budget_max_usd is not None else None,
+                formula=b.formula,
+                inputs=b.inputs,
+                source_name=b.source_name,
+                source_url=b.source_url,
+                computed_at=b.computed_at,
+            )
+            for b in budget_estimates
         ],
         marketing=marketing,
     )
