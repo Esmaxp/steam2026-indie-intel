@@ -2,11 +2,15 @@ import enum
 
 
 class DataStatus(str, enum.Enum):
-    """Provenance of any value Steam does not expose. Never fabricate data."""
+    """Provenance of any value Steam does not expose. Never fabricate data.
+
+    CONFLICTING marks a value whose independent estimate sources disagree by
+    more than 50% — shown with every source so the reader judges."""
 
     CONFIRMED = "confirmed"
     ESTIMATED = "estimated"
     UNKNOWN = "unknown"
+    CONFLICTING = "conflicting"
 
 
 class IndieConfidence(str, enum.Enum):

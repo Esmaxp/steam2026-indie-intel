@@ -7,7 +7,8 @@ Values are never invented; missing data stays NULL with status "unknown".
 
 import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Numeric, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -110,5 +111,35 @@ class MarketingInfo(Base, TimestampMixin):
     kickstarter_url: Mapped[str | None] = mapped_column(Text)
     source_name: Mapped[str | None] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(Text)
+    # Team-cost budget inputs — only from disclosed, human-verified sources.
+    team_size: Mapped[int | None] = mapped_column(Integer)
+    team_region: Mapped[str | None] = mapped_column(Text)
+    dev_duration_months: Mapped[int | None] = mapped_column(Integer)
 
     game: Mapped["Game"] = relationship(back_populates="marketing_info")  # noqa: F821
+
+
+class BudgetEstimate(Base):
+    """Auditable budget heuristics — never presented as fact.
+
+    Each row stores the method, the resulting range, the formula text and the
+    exact inputs used, so every number can be traced and re-derived."""
+
+    __tablename__ = "budget_estimates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    appid: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("games.appid", ondelete="CASCADE"), index=True
+    )
+    method: Mapped[str] = mapped_column(Text)  # team_cost | revenue_ratio
+    budget_min_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    budget_max_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    formula: Mapped[str] = mapped_column(Text)
+    inputs: Mapped[dict] = mapped_column(JSONB)
+    source_name: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    computed_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    game: Mapped["Game"] = relationship()  # noqa: F821

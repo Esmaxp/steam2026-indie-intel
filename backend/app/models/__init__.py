@@ -7,7 +7,13 @@ from app.models.associations import (
     game_publishers,
     game_tags,
 )
-from app.models.business import MarketingInfo, RevenueRecord, WishlistRecord
+from app.models.business import (
+    BudgetEstimate,
+    MarketingInfo,
+    RevenueEstimate,
+    RevenueRecord,
+    WishlistRecord,
+)
 from app.models.company import Developer, Publisher
 from app.models.enums import (
     Camera,
@@ -30,6 +36,7 @@ from app.models.sync import SyncState
 from app.models.taxonomy import Genre, Tag
 
 __all__ = [
+    "BudgetEstimate",
     "Camera",
     "ControllerSupport",
     "DataStatus",
@@ -45,6 +52,7 @@ __all__ = [
     "MediaAsset",
     "MediaType",
     "Publisher",
+    "RevenueEstimate",
     "RevenueRecord",
     "SteamDeckSupport",
     "SteamStats",
