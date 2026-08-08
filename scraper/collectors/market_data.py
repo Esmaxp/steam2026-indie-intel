@@ -20,6 +20,7 @@ Provenance rules (never fabricate):
 
 import datetime
 import logging
+from dataclasses import dataclass
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -31,6 +32,7 @@ from app.models import (
     DataStatus,
     Festival,
     Game,
+    RevenueEstimate,
     RevenueRecord,
     SteamStats,
     SyncStage,
@@ -44,6 +46,8 @@ from scraper.collectors.market_sources import (
     fetch_next_fest_mentions,
     fetch_review_summary,
 )
+from scraper.collectors.steamspy_source import fetch_steamspy
+from scraper.collectors.vginsights_source import fetch_vginsights, robots_allows_games
 from scraper.common.http import SteamClient, make_session
 from scraper.common.sync import mark, pending_appids
 from tenacity import RetryError
@@ -53,6 +57,8 @@ logger = logging.getLogger(__name__)
 STEAM_MIN_INTERVAL = 1.5
 CHARTS_MIN_INTERVAL = 2.0
 GAMALYTIC_MIN_INTERVAL = 2.0
+STEAMSPY_MIN_INTERVAL = 1.1   # SteamSpy recommends ~1 req/sec
+VGINSIGHTS_MIN_INTERVAL = 2.0
 
 NEXT_FEST_NAME = "Steam Next Fest"
 
@@ -97,13 +103,24 @@ async def _ensure_next_fest(db: AsyncSession) -> int:
     return result.scalar_one()
 
 
+@dataclass
+class MarketSources:
+    """Clients + circuit breakers for every market-data source."""
+
+    steam: SteamClient
+    charts: SteamClient
+    gamalytic: SteamClient
+    steamspy: SteamClient
+    vginsights: SteamClient
+    gamalytic_breaker: SourceBreaker
+    steamspy_breaker: SourceBreaker
+    vginsights_breaker: SourceBreaker
+
+
 async def collect_one(
     db: AsyncSession,
-    steam_client: SteamClient,
-    charts_client: SteamClient,
-    gamalytic_client: SteamClient,
+    sources: MarketSources,
     appid: int,
-    gamalytic_breaker: SourceBreaker,
 ) -> tuple[SyncStatus, str]:
     game = (
         await db.execute(sa.select(Game.is_released).where(Game.appid == appid))
@@ -115,7 +132,7 @@ async def collect_one(
     # 1. Steam reviews — authoritative.
     reviews = None
     try:
-        reviews = await fetch_review_summary(steam_client, appid)
+        reviews = await fetch_review_summary(sources.steam, appid)
     except Exception as exc:
         logger.warning("Reviews failed for %s: %s", appid, exc)
 
@@ -123,26 +140,46 @@ async def collect_one(
     ccu = None
     if is_released:
         try:
-            ccu = await fetch_ccu_stats(charts_client, appid)
+            ccu = await fetch_ccu_stats(sources.charts, appid)
         except (Exception, RetryError) as exc:
             logger.debug("SteamCharts unavailable for %s: %s", appid, exc)
 
     # 3. Gamalytic estimates (skipped entirely once the breaker opens).
     estimates = None
-    if not gamalytic_breaker.open:
+    if not sources.gamalytic_breaker.open:
         try:
-            estimates = await fetch_gamalytic(gamalytic_client, appid)
-            gamalytic_breaker.record_success()
+            estimates = await fetch_gamalytic(sources.gamalytic, appid)
+            sources.gamalytic_breaker.record_success()
         except Exception as exc:
-            gamalytic_breaker.record_failure()
+            sources.gamalytic_breaker.record_failure()
             logger.debug("Gamalytic unavailable for %s: %s", appid, exc)
 
     # 4. Next Fest mentions from official Steam news.
     mentions = []
     try:
-        mentions = await fetch_next_fest_mentions(steam_client, appid)
+        mentions = await fetch_next_fest_mentions(sources.steam, appid)
     except Exception as exc:
         logger.warning("News fetch failed for %s: %s", appid, exc)
+
+    # 5. SteamSpy owners estimate (skipped once its breaker opens).
+    steamspy = None
+    if not sources.steamspy_breaker.open:
+        try:
+            steamspy = await fetch_steamspy(sources.steamspy, appid)
+            sources.steamspy_breaker.record_success()
+        except Exception as exc:
+            sources.steamspy_breaker.record_failure()
+            logger.debug("SteamSpy unavailable for %s: %s", appid, exc)
+
+    # 6. VG Insights revenue estimate (skipped once its breaker opens).
+    vginsights = None
+    if not sources.vginsights_breaker.open:
+        try:
+            vginsights = await fetch_vginsights(sources.vginsights, appid)
+            sources.vginsights_breaker.record_success()
+        except Exception as exc:
+            sources.vginsights_breaker.record_failure()
+            logger.debug("VG Insights unavailable for %s: %s", appid, exc)
 
     # --- persist -----------------------------------------------------------
     sources = []
@@ -182,21 +219,52 @@ async def collect_one(
             )
         )
 
+    # --- raw multi-source estimate rows (revenue_estimates table) ----------
+    run_estimates: list[RevenueEstimate] = []
     if estimates is not None and (
-        estimates.revenue_usd is not None or estimates.copies_sold is not None
+        estimates.revenue_usd is not None
+        or estimates.copies_sold is not None
+        or estimates.owners is not None
     ):
-        db.add(
-            RevenueRecord(
+        run_estimates.append(
+            RevenueEstimate(
                 appid=appid,
+                source_name="gamalytic",
                 status=DataStatus.ESTIMATED,
-                gross_revenue_usd=estimates.revenue_usd,
+                revenue_usd=estimates.revenue_usd,
                 estimated_sales=estimates.copies_sold,
-                estimated_owners_min=estimates.owners,
-                estimated_owners_max=estimates.owners,
-                source_name="Gamalytic (public estimate)",
+                owners_min=estimates.owners,
+                owners_max=estimates.owners,
+                wishlist_count=estimates.wishlists,
                 source_url=estimates.source_url,
             )
         )
+    if steamspy is not None:
+        run_estimates.append(
+            RevenueEstimate(
+                appid=appid,
+                source_name="steamspy",
+                status=DataStatus.ESTIMATED,
+                owners_min=steamspy.owners_min,
+                owners_max=steamspy.owners_max,
+                source_url=steamspy.source_url,
+            )
+        )
+    if vginsights is not None:
+        run_estimates.append(
+            RevenueEstimate(
+                appid=appid,
+                source_name="vginsights",
+                status=DataStatus.ESTIMATED,
+                revenue_usd=vginsights.revenue_usd,
+                estimated_sales=vginsights.copies_sold,
+                owners_min=vginsights.owners_min,
+                owners_max=vginsights.owners_max,
+                source_url=vginsights.source_url,
+            )
+        )
+    for row in run_estimates:
+        db.add(row)
 
     if mentions:
         festival_id = await _ensure_next_fest(db)
@@ -220,15 +288,32 @@ async def collect_one(
 
 
 async def run_market_collector(limit: int = 0, only_appid: int | None = None) -> dict:
-    gamalytic_breaker = SourceBreaker("gamalytic.com")
     async with make_session() as http, make_session(BROWSER_UA) as browser_http:
-        steam_client = SteamClient(http, min_interval=STEAM_MIN_INTERVAL)
-        # SteamCharts answers 500 for games it has no chart for — retrying six
-        # times per missing game would burn ~2 minutes each, so cap at 2.
-        charts_client = SteamClient(
-            browser_http, min_interval=CHARTS_MIN_INTERVAL, max_attempts=2
+        sources = MarketSources(
+            steam=SteamClient(http, min_interval=STEAM_MIN_INTERVAL),
+            # SteamCharts answers 500 for games it has no chart for — retrying
+            # six times per missing game burned ~2 min each, so cap at 2.
+            charts=SteamClient(
+                browser_http, min_interval=CHARTS_MIN_INTERVAL, max_attempts=2
+            ),
+            gamalytic=SteamClient(browser_http, min_interval=GAMALYTIC_MIN_INTERVAL),
+            steamspy=SteamClient(browser_http, min_interval=STEAMSPY_MIN_INTERVAL),
+            vginsights=SteamClient(
+                browser_http, min_interval=VGINSIGHTS_MIN_INTERVAL, max_attempts=2
+            ),
+            gamalytic_breaker=SourceBreaker("gamalytic.com"),
+            steamspy_breaker=SourceBreaker("steamspy.com"),
+            vginsights_breaker=SourceBreaker("vginsights.com"),
         )
-        gamalytic_client = SteamClient(browser_http, min_interval=GAMALYTIC_MIN_INTERVAL)
+
+        # robots.txt gate — checked once per run, before any page scraping.
+        try:
+            if not await robots_allows_games(sources.vginsights):
+                sources.vginsights_breaker.open = True
+                logger.warning("VG Insights robots.txt disallows game pages — source off")
+        except Exception as exc:
+            sources.vginsights_breaker.open = True
+            logger.warning("VG Insights robots check failed (%s) — source off", exc)
 
         async with async_session_factory() as db:
             if only_appid is not None:
@@ -240,10 +325,7 @@ async def run_market_collector(limit: int = 0, only_appid: int | None = None) ->
         async with async_session_factory() as db:
             for appid in tqdm(queue, desc="market data", unit="game"):
                 try:
-                    status, reason = await collect_one(
-                        db, steam_client, charts_client, gamalytic_client, appid,
-                        gamalytic_breaker,
-                    )
+                    status, reason = await collect_one(db, sources, appid)
                 except Exception as exc:
                     status, reason = SyncStatus.FAILED, str(exc)[:500]
                     logger.warning("appid %s failed: %s", appid, exc)
