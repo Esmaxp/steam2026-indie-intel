@@ -285,3 +285,44 @@ docker compose up --build
 
 Frontend joins Docker Compose in Phase 6 and will serve
 `http://localhost:3000`.
+
+---
+
+## 9. Revenue & Budget Methodology (Phases 9–16)
+
+### Indie filter (multi-signal)
+
+The Steam "Indie" genre is the mandatory base filter. On top of it:
+`games.indie_confidence` = **high** (self-published: developer == publisher,
+suffix-insensitive), **medium** (third-party or Devolver-scale boutique
+label), **low** (publisher matches the known AAA/AA list → also
+`is_indie=false`; flagged, never deleted). Companies shipping 5+ titles in
+any 30-day window get `low_quality_signal=true` on all their games
+(mass-publishing / asset-flip pattern) — surfaced as a filter, not removed.
+
+### Revenue: multi-source cross-validation
+
+Raw layer `revenue_estimates`: one row per (game, source, fetch) — sources
+are `gamalytic` (API-key gated), `steamspy` (owners ranges, free API),
+`vginsights` (public pages; currently an authenticated SPA → honest Unknown),
+`disclosed` (human-verified figures via CLI, always Confirmed). Every row
+carries `source_url` + `retrieved_at`.
+
+Summary layer `revenue_records` (what the UI shows):
+1. A Confirmed disclosure wins outright.
+2. One estimate → passed through as `estimated`.
+3. 2+ estimates → **median**; `estimate_spread = (max−min)/median`;
+   spread > 0.5 → status **conflicting**, all sources listed and linked.
+   Owners merge as min-of-mins .. max-of-maxes.
+
+### Budget: two labeled heuristics, never fact
+
+- **Confirmed** only from public disclosures entered via
+  `disclosed_numbers_source.py` (source URL mandatory).
+- **Method A (team_cost)** = team_size × dev_months × regional monthly cost
+  (`budget_cost_tables.py`, cited). Missing any input → no calculation.
+- **Method B (revenue_ratio)** = gross revenue × [0.20 .. 0.40], citing
+  public GameDiscoverCo break-even analyses; skipped when revenue is
+  conflicting/unknown.
+Both methods store formula + exact inputs in `budget_estimates` (auditable);
+the game page shows a "How was the budget estimated?" panel.

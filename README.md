@@ -7,9 +7,18 @@ plan, database schema and roadmap.
 ## Data honesty
 
 Steam does **not** expose wishlist, revenue or budget numbers. Every such
-value in this platform is stored with a provenance status —
-**Confirmed / Estimated / Unknown** — and a public source. Data is never
+value is stored with a provenance status — **Confirmed / Estimated /
+Unknown / Conflicting** — plus a source link and fetch date. Data is never
 fabricated.
+
+Estimate sources: SteamSpy (owner ranges, free API), Gamalytic (requires
+`GAMALYTIC_API_KEY`), VG Insights public pages (currently behind an
+authenticated SPA → honestly Unknown), and human-verified disclosures via
+`python -m scraper.collectors.disclosed_numbers_source`. Multiple estimates
+are cross-validated by median; sources disagreeing by more than 50% are
+marked **Conflicting** with every source shown. Budgets are either Confirmed
+disclosures or explicitly labeled heuristics (team-cost and revenue-ratio
+methods, formulas and inputs stored for audit — see ARCHITECTURE.md §9).
 
 ## Quick start
 
