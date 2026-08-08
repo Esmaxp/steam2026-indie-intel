@@ -29,3 +29,7 @@ media/*
 Thumbs.db
 .idea/
 .vscode/
+
+# Internal prompt/spec notes - never published
+promt.md
+promt.txt
