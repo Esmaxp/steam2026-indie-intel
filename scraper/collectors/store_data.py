@@ -16,6 +16,7 @@ Honesty rules applied here:
 
 import datetime
 import logging
+import re
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -28,6 +29,7 @@ from app.models import (
     Developer,
     Game,
     Genre,
+    MarketingInfo,
     MediaAsset,
     MediaType,
     Publisher,
@@ -70,6 +72,10 @@ _DECK_CATEGORY_MAP = {
     2: SteamDeckSupport.PLAYABLE,
     3: SteamDeckSupport.VERIFIED,
 }
+
+_KICKSTARTER_RE = re.compile(
+    r"https?://(?:www\.)?kickstarter\.com/projects/[^\s\"'<>)\]]+", re.I
+)
 
 
 async def _get_or_create_by_name(db: AsyncSession, model, name: str, **extra) -> int:
@@ -232,7 +238,7 @@ async def collect_one(
     stmt = stmt.on_conflict_do_update(index_elements=[Game.appid], set_=update_values)
     await db.execute(stmt)
 
-    # --- companies (Steam gives names only; country/website stay unknown) --
+    # --- companies (Steam gives names only; country stays unknown) ---------
     dev_ids = {}
     for name in details.get("developers") or []:
         if name.strip():
@@ -241,6 +247,22 @@ async def collect_one(
         db, game_developers, appid,
         [{"appid": appid, "developer_id": i} for i in dev_ids],
     )
+
+    # The store page's linked website is the developer's own site for
+    # single-developer games; recorded with its provenance in notes.
+    game_website = (details.get("website") or "").strip()
+    if game_website and len(dev_ids) == 1 and "kickstarter.com" not in game_website:
+        await db.execute(
+            sa.update(Developer)
+            .where(Developer.id == next(iter(dev_ids)), Developer.website.is_(None))
+            .values(
+                website=game_website,
+                notes=sa.func.coalesce(
+                    Developer.notes,
+                    "Website from the game's Steam store page listing",
+                ),
+            )
+        )
 
     pub_ids = {}
     for name in details.get("publishers") or []:
@@ -311,6 +333,23 @@ async def collect_one(
             )
     if media_rows:
         await db.execute(sa.insert(MediaAsset), media_rows)
+
+    # --- Kickstarter link, when the store page itself advertises one -------
+    ks_match = _KICKSTARTER_RE.search(
+        f"{details.get('website') or ''}\n{_description_corpus(details)}"
+    )
+    if ks_match:
+        ks_url = ks_match.group(0).rstrip(".,")
+        stmt = pg_insert(MarketingInfo).values(
+            appid=appid,
+            kickstarter_url=ks_url,
+            source_name="Steam store page",
+            source_url=values["steam_store_url"],
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[MarketingInfo.appid], set_={"kickstarter_url": ks_url}
+        )
+        await db.execute(stmt)
 
     # Queue Phase 4 market-data collection.
     await register_pending(db, [appid], SyncStage.MARKET_DATA)

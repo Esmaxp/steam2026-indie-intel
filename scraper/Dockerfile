@@ -13,6 +13,7 @@ COPY backend/app backend/app
 RUN pip install --upgrade pip && pip install ./backend
 
 COPY scraper scraper
+COPY workers workers
 
 ENV PYTHONPATH=/srv
 CMD ["python", "-m", "scraper.discovery.run", "--mode", "search"]
