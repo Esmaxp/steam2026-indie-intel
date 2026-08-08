@@ -73,6 +73,22 @@ function ParamSelect({
   );
 }
 
+/** include_flagged defaults to true server-side; the toggle sets it false. */
+function HideFlaggedToggle() {
+  const { searchParams, setParams } = useFilterParams();
+  const active = searchParams.get("include_flagged") === "false";
+  return (
+    <Button
+      onClick={() => setParams({ include_flagged: active ? null : "false" })}
+      className={active ? "border-accent bg-accent/10 text-accent" : ""}
+      aria-pressed={active}
+      title="Hide games flagged for mass-publishing patterns (5+ releases by the same company within 30 days)"
+    >
+      Hide flagged
+    </Button>
+  );
+}
+
 function ParamToggle({ paramKey, label }: { paramKey: string; label: string }) {
   const { searchParams, setParams } = useFilterParams();
   const active = searchParams.get(paramKey) === "true";
@@ -129,6 +145,15 @@ export function FiltersBar() {
         <ParamToggle paramKey="next_fest" label="Next Fest" />
         <ParamToggle paramKey="released" label="Released" />
         <ParamToggle paramKey="early_access" label="Early Access" />
+        <ParamSelect
+          paramKey="indie_confidence"
+          label="Indie confidence"
+          options={["high", "medium", "low"]}
+          optionLabels={(v) =>
+            v === "high" ? "High confidence" : v === "medium" ? "Medium" : "Low (flagged)"
+          }
+        />
+        <HideFlaggedToggle />
         <ParamSelect
           paramKey="wishlist_status"
           label="Wishlist status"

@@ -45,6 +45,8 @@ def _flatten(item: GameListItem) -> dict:
         "camera": item.camera,
         "graphics_style": item.graphics_style,
         "engine": item.engine,
+        "indie_confidence": item.indie_confidence,
+        "low_quality_signal": item.low_quality_signal,
         "is_free": item.is_free,
         "currency": item.currency,
         "current_price": (

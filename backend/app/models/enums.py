@@ -9,6 +9,14 @@ class DataStatus(str, enum.Enum):
     UNKNOWN = "unknown"
 
 
+class IndieConfidence(str, enum.Enum):
+    """Multi-signal confidence that a game is genuinely indie."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
 class Dimension(str, enum.Enum):
     TWO_D = "2d"
     TWO_HALF_D = "2.5d"

@@ -43,6 +43,8 @@ from app.models import (
     game_tags,
 )
 from scraper.classifiers.classify import classify
+from scraper.classifiers.indie_signals import score_indie_signals
+from scraper.classifiers.mass_publishing import flag_mass_publishing
 from scraper.collectors.steam_sources import (
     AGE_GATE_COOKIES,
     fetch_appdetails,
@@ -180,6 +182,9 @@ async def collect_one(
     )
 
     # --- assemble the game row --------------------------------------------
+    indie_signal = score_indie_signals(
+        details.get("developers") or [], details.get("publishers") or []
+    )
     coming_soon = bool(release_info.get("coming_soon"))
     is_released = not coming_soon and parsed.date is not None
     early_access = any(
@@ -229,7 +234,11 @@ async def collect_one(
         "camera": result.camera,
         "graphics_style": result.graphics_style,
         "engine": result.engine,
-        "is_indie": True,
+        # Base filter (Indie genre) passed; refine with publisher-size and
+        # self-publishing signals. Major-publisher titles are flagged
+        # (is_indie=False, confidence=low), never silently deleted.
+        "is_indie": indie_signal.is_indie,
+        "indie_confidence": indie_signal.confidence,
         "last_synced_at": sa.func.now(),
     }
     update_values = {k: v for k, v in values.items() if k != "appid"}
@@ -387,4 +396,12 @@ async def run_store_collector(limit: int = 0, only_appid: int | None = None) -> 
                     failed += 1
 
     logger.info("Store collector batch: done=%d skipped=%d failed=%d", done, skipped, failed)
+
+    if done:
+        try:
+            flagged = await flag_mass_publishing()
+            logger.info("Mass-publishing recheck after batch: %d flagged", flagged)
+        except Exception as exc:
+            logger.warning("Mass-publishing pass failed: %s", exc)
+
     return {"done": done, "skipped": skipped, "failed": failed, "queued": len(queue)}

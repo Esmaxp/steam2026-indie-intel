@@ -20,6 +20,7 @@ from app.models import (
     GameEngine,
     Genre,
     GraphicsStyle,
+    IndieConfidence,
     MarketingInfo,
     Publisher,
     RevenueRecord,
@@ -95,6 +96,8 @@ class GameFilters:
     min_revenue: float | None = None
     wishlist_status: DataStatus | None = None
     revenue_status: DataStatus | None = None
+    indie_confidence: IndieConfidence | None = None
+    include_flagged: bool = True  # False hides low_quality_signal games
     sort: str = "-release_date"
 
 
@@ -170,6 +173,10 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         conds.append(Game.is_free.is_(f.free))
     if f.release_month is not None:
         conds.append(sa.extract("month", Game.release_date) == f.release_month)
+    if f.indie_confidence is not None:
+        conds.append(Game.indie_confidence == f.indie_confidence)
+    if not f.include_flagged:
+        conds.append(Game.low_quality_signal.is_(False))
     if f.min_reviews is not None:
         conds.append(ls.c.total_reviews >= f.min_reviews)
     if f.min_positive_pct is not None:

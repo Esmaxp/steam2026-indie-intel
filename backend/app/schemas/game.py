@@ -77,6 +77,9 @@ class GameListItem(BaseModel):
     graphics_style: str = "unknown"
     engine: str = "unknown"
 
+    indie_confidence: str = "medium"
+    low_quality_signal: bool = False
+
     is_free: bool = False
     currency: str | None = None
     current_price_cents: int | None = None

@@ -58,6 +58,8 @@ def row_to_list_item(row) -> GameListItem:
         camera=_enum_value(game.camera),
         graphics_style=_enum_value(game.graphics_style),
         engine=_enum_value(game.engine),
+        indie_confidence=_enum_value(game.indie_confidence),
+        low_quality_signal=game.low_quality_signal,
         is_free=game.is_free,
         currency=game.currency,
         current_price_cents=game.current_price_cents,

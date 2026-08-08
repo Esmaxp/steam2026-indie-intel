@@ -19,6 +19,7 @@ from app.models.enums import (
     Dimension,
     GameEngine,
     GraphicsStyle,
+    IndieConfidence,
     SteamDeckSupport,
 )
 
@@ -83,6 +84,15 @@ class Game(Base, TimestampMixin):
 
     # Discovery bookkeeping.
     is_indie: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Multi-signal indie score: genre is the base filter; publisher size and
+    # self-publishing move the needle. Low = flagged for review, never deleted.
+    indie_confidence: Mapped[IndieConfidence] = mapped_column(
+        pg_enum(IndieConfidence, "indie_confidence"),
+        default=IndieConfidence.MEDIUM,
+        index=True,
+    )
+    # Mass-publishing pattern (same company, 5+ releases in 30 days).
+    low_quality_signal: Mapped[bool] = mapped_column(Boolean, default=False)
     first_seen_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

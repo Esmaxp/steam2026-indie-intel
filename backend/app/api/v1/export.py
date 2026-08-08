@@ -14,6 +14,7 @@ from app.models import (
     Game,
     GameEngine,
     GraphicsStyle,
+    IndieConfidence,
 )
 from app.services.export import EXPORT_ROW_CAP, MEDIA_TYPES, export_bytes
 from app.services.games_query import GameFilters, build_games_query
@@ -54,6 +55,8 @@ async def export_games(
     min_revenue: float | None = Query(None, ge=0),
     wishlist_status: DataStatus | None = None,
     revenue_status: DataStatus | None = None,
+    indie_confidence: IndieConfidence | None = None,
+    include_flagged: bool = True,
     sort: str = "-release_date",
 ) -> Response:
     filters = GameFilters(
@@ -63,7 +66,8 @@ async def export_games(
         early_access=early_access, free=free, release_month=release_month,
         min_reviews=min_reviews, min_positive_pct=min_positive_pct,
         min_peak_ccu=min_peak_ccu, min_wishlist=min_wishlist, min_revenue=min_revenue,
-        wishlist_status=wishlist_status, revenue_status=revenue_status, sort=sort,
+        wishlist_status=wishlist_status, revenue_status=revenue_status,
+        indie_confidence=indie_confidence, include_flagged=include_flagged, sort=sort,
     )
     query = build_games_query(filters)
     rows = (
