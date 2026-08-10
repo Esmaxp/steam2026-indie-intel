@@ -73,6 +73,40 @@ function ParamSelect({
   );
 }
 
+const RELEASE_STATUS_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "released", label: "Released" },
+  { value: "upcoming", label: "Upcoming (2026)" },
+] as const;
+
+/** 3-way segmented control bound to the release_status query param. */
+function ReleaseStatusControl() {
+  const { searchParams, setParams } = useFilterParams();
+  const current = searchParams.get("release_status") ?? "";
+  return (
+    <div
+      className="inline-flex overflow-hidden rounded-md border border-hairline"
+      role="group"
+      aria-label="Release status"
+    >
+      {RELEASE_STATUS_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          onClick={() => setParams({ release_status: option.value || null })}
+          aria-pressed={current === option.value}
+          className={`h-9 px-3 text-sm transition-colors ${
+            current === option.value
+              ? "bg-accent/10 font-medium text-accent"
+              : "bg-surface text-ink2 hover:bg-grid/40"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** include_flagged defaults to true server-side; the toggle sets it false. */
 function HideFlaggedToggle() {
   const { searchParams, setParams } = useFilterParams();
@@ -143,7 +177,7 @@ export function FiltersBar() {
       <div className="flex flex-wrap items-center gap-2">
         <ParamToggle paramKey="demo_available" label="Has demo" />
         <ParamToggle paramKey="next_fest" label="Next Fest" />
-        <ParamToggle paramKey="released" label="Released" />
+        <ReleaseStatusControl />
         <ParamToggle paramKey="early_access" label="Early Access" />
         <ParamSelect
           paramKey="indie_confidence"

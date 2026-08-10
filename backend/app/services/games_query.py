@@ -85,7 +85,7 @@ class GameFilters:
     graphics_style: GraphicsStyle | None = None
     demo_available: bool | None = None
     next_fest: bool | None = None
-    released: bool | None = None
+    release_status: str = "all"  # released | upcoming | all
     early_access: bool | None = None
     free: bool | None = None
     release_month: int | None = None
@@ -166,8 +166,10 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         conds.append(Game.demo_available.is_(f.demo_available))
     if f.next_fest is not None:
         conds.append(nf if f.next_fest else sa.not_(nf))
-    if f.released is not None:
-        conds.append(Game.is_released.is_(f.released))
+    if f.release_status == "released":
+        conds.append(Game.is_released.is_(True))
+    elif f.release_status == "upcoming":
+        conds.append(Game.is_released.is_(False))
     if f.early_access is not None:
         conds.append(Game.early_access.is_(f.early_access))
     if f.free is not None:

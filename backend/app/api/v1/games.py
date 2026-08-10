@@ -26,8 +26,9 @@ from app.models import (
     game_tags,
 )
 from app.schemas.common import Page
-from app.schemas.game import GameDetail, GameListItem, StatsPoint
+from app.schemas.game import GameDetail, GameListItem, GameSearchResult, StatsPoint
 from app.services.games_query import GameFilters, build_games_query
+from app.services.similar_games import build_similar_query, fetch_source
 
 router = APIRouter()
 
@@ -53,7 +54,11 @@ async def list_games(
     graphics_style: GraphicsStyle | None = None,
     demo_available: bool | None = None,
     next_fest: bool | None = None,
-    released: bool | None = None,
+    release_status: str = Query(
+        "all",
+        pattern="^(released|upcoming|all)$",
+        description="released = out now, upcoming = 2026-dated but not out yet",
+    ),
     early_access: bool | None = None,
     free: bool | None = None,
     release_month: int | None = Query(None, ge=1, le=12),
@@ -79,7 +84,8 @@ async def list_games(
     filters = GameFilters(
         q=q, developer=developer, publisher=publisher, genre=genre, tag=tag,
         engine=engine, dimension=dimension, camera=camera, graphics_style=graphics_style,
-        demo_available=demo_available, next_fest=next_fest, released=released,
+        demo_available=demo_available, next_fest=next_fest,
+        release_status=release_status,
         early_access=early_access, free=free, release_month=release_month,
         min_reviews=min_reviews, min_positive_pct=min_positive_pct,
         min_peak_ccu=min_peak_ccu, min_wishlist=min_wishlist, min_revenue=min_revenue,
@@ -103,6 +109,46 @@ async def list_games(
         page_size=page_size,
         pages=max(1, math.ceil(total / page_size)),
     )
+
+
+# NOTE: declared before /{appid} so the literal path wins route matching.
+@router.get("/search", response_model=list[GameSearchResult])
+async def search_games(
+    db: AsyncSession = Depends(get_db),
+    q: str = Query(..., min_length=2, description="name substring"),
+    limit: int = Query(10, ge=1, le=25),
+) -> list[GameSearchResult]:
+    rows = (
+        await db.execute(
+            sa.select(Game.appid, Game.name)
+            .where(Game.name.ilike(f"%{q}%"))
+            .order_by(
+                # prefix matches first, then shortest names (closest match)
+                sa.case((Game.name.ilike(f"{q}%"), 0), else_=1),
+                sa.func.length(Game.name),
+                Game.appid,
+            )
+            .limit(limit)
+        )
+    ).all()
+    return [GameSearchResult(appid=appid, name=name) for appid, name in rows]
+
+
+@router.get("/{appid}/similar", response_model=list[GameListItem])
+async def similar_games(
+    appid: int,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(10, ge=1, le=50),
+    include_flagged: bool = Query(
+        False, description="mass-publishing-flagged games are excluded by default"
+    ),
+) -> list[GameListItem]:
+    source = await fetch_source(db, appid)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+    stmt = build_similar_query(source, limit, include_flagged).options(*_GAME_LOAD_OPTIONS)
+    rows = (await db.execute(stmt)).all()
+    return [row_to_list_item(row) for row in rows]
 
 
 @router.get("/{appid}", response_model=GameDetail)

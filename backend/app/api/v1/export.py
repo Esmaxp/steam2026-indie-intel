@@ -44,7 +44,7 @@ async def export_games(
     graphics_style: GraphicsStyle | None = None,
     demo_available: bool | None = None,
     next_fest: bool | None = None,
-    released: bool | None = None,
+    release_status: str = Query("all", pattern="^(released|upcoming|all)$"),
     early_access: bool | None = None,
     free: bool | None = None,
     release_month: int | None = Query(None, ge=1, le=12),
@@ -62,7 +62,8 @@ async def export_games(
     filters = GameFilters(
         q=q, developer=developer, publisher=publisher, genre=genre, tag=tag,
         engine=engine, dimension=dimension, camera=camera, graphics_style=graphics_style,
-        demo_available=demo_available, next_fest=next_fest, released=released,
+        demo_available=demo_available, next_fest=next_fest,
+        release_status=release_status,
         early_access=early_access, free=free, release_month=release_month,
         min_reviews=min_reviews, min_positive_pct=min_positive_pct,
         min_peak_ccu=min_peak_ccu, min_wishlist=min_wishlist, min_revenue=min_revenue,
