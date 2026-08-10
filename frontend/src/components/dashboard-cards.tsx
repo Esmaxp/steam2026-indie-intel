@@ -45,8 +45,8 @@ export function DashboardCards() {
 
   if (isLoading || !data) {
     return (
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-9">
-        {Array.from({ length: 9 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        {Array.from({ length: 10 }).map((_, i) => (
           <Card key={i} className="h-[76px] animate-pulse" />
         ))}
       </div>
@@ -58,9 +58,10 @@ export function DashboardCards() {
   const avgRev = avgTile(data.avg_reviews);
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-9">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
       <Tile label="Total games" value={fmtInt(data.total_games)} />
       <Tile label="Released" value={fmtInt(data.released_games)} />
+      <Tile label="Upcoming (2026)" value={fmtInt(data.coming_soon_games)} />
       <Tile label="2D games" value={fmtInt(data.two_d_games)} />
       <Tile label="3D games" value={fmtInt(data.three_d_games)} />
       <Tile label="With demo" value={fmtInt(data.games_with_demo)} />
