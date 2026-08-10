@@ -179,6 +179,13 @@ class GameDetail(GameListItem):
     marketing: MarketingOut | None = None
 
 
+class GameSearchResult(BaseModel):
+    """Lightweight pair for the similar-games autocomplete."""
+
+    appid: int
+    name: str
+
+
 class AverageStat(BaseModel):
     """Average over games that actually have the value; sample_size says how
     many that is — never an average over invented zeros."""

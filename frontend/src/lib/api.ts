@@ -27,6 +27,16 @@ export function fetchGame(appid: number) {
   return getJson<GameDetail>(`/api/v1/games/${appid}`);
 }
 
+export function fetchGameSearch(q: string, limit = 8) {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  return getJson<{ appid: number; name: string }[]>("/api/v1/games/search", params);
+}
+
+export function fetchSimilarGames(appid: number, limit = 10) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return getJson<GameListItem[]>(`/api/v1/games/${appid}/similar`, params);
+}
+
 export function fetchGameStats(appid: number) {
   return getJson<StatsPoint[]>(`/api/v1/games/${appid}/stats`);
 }

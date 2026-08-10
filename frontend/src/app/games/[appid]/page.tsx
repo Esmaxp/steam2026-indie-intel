@@ -16,6 +16,7 @@ import {
   labelFor,
 } from "@/lib/format";
 import type { GameDetail, Provenanced } from "@/lib/types";
+import { SimilarGamesList } from "@/components/similar-games-search";
 import { StatsHistoryChart } from "@/components/stats-history-chart";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -366,6 +367,11 @@ export default function GamePage({
       </div>
 
       <StatsHistoryChart appid={game.appid} />
+
+      <Card className="p-5">
+        <h2 className="mb-3 text-sm font-medium text-muted">Similar games</h2>
+        <SimilarGamesList appid={game.appid} limit={8} />
+      </Card>
 
       {screenshots.length > 0 ? (
         <Card className="p-5">
