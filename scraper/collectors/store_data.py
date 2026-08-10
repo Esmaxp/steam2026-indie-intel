@@ -142,20 +142,26 @@ async def collect_one(
         await _remove_game(db, appid)
         return SyncStatus.SKIPPED, f"year_{parsed.year or 'unknown'}"
 
-    genres = details.get("genres") or []
-    if not any(
-        str(g.get("id")) == INDIE_GENRE_ID or str(g.get("description", "")).lower() == "indie"
-        for g in genres
-    ):
-        await _remove_game(db, appid)
-        return SyncStatus.SKIPPED, "not_indie"
-
-    # --- secondary Steam sources (each optional; failure → unknown) --------
+    # Tags are fetched before the indie decision: freshly listed pages often
+    # have sparse genre metadata (no Indie genre yet) while already carrying
+    # the Indie store tag — discovery admits them via that tag, so deleting
+    # them here for a missing genre would silently undo discovery.
     try:
         tags = await fetch_store_page_tags(page_client, appid)
     except Exception as exc:
         logger.warning("Store page tags failed for %s: %s", appid, exc)
         tags = []
+
+    genres = details.get("genres") or []
+    genre_indie = any(
+        str(g.get("id")) == INDIE_GENRE_ID or str(g.get("description", "")).lower() == "indie"
+        for g in genres
+    )
+    tag_indie = any(name.strip().lower() == "indie" for name, _ in tags)
+    if not genre_indie and not tag_indie:
+        await _remove_game(db, appid)
+        return SyncStatus.SKIPPED, "not_indie"
+    tag_only_indie = not genre_indie
 
     try:
         deck_support = _DECK_CATEGORY_MAP.get(
@@ -185,6 +191,17 @@ async def collect_one(
     indie_signal = score_indie_signals(
         details.get("developers") or [], details.get("publishers") or []
     )
+    if tag_only_indie and indie_signal.is_indie:
+        # Tag-only indie is a weaker signal than the genre — keep the game
+        # but cap confidence at LOW (surfaced in filters, never deleted).
+        from app.models import IndieConfidence
+        from scraper.classifiers.indie_signals import IndieSignal
+
+        indie_signal = IndieSignal(
+            confidence=IndieConfidence.LOW,
+            is_indie=True,
+            reason=indie_signal.reason + " (Indie via store tag only — genre missing)",
+        )
     coming_soon = bool(release_info.get("coming_soon"))
     is_released = not coming_soon and parsed.date is not None
     early_access = any(

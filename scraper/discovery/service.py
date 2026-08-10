@@ -83,6 +83,10 @@ async def run_search_discovery(max_pages: int = 2000) -> dict:
                 ):
                     page_years = []
                     for row in rows:
+                        # Audit trail: raw release text per row (LOG_LEVEL=DEBUG)
+                        logger.debug(
+                            "search row appid=%s release_text=%r", row.appid, row.release_text
+                        )
                         parsed = parse_release(row.release_text)
                         if parsed.year is not None:
                             page_years.append(parsed.year)
@@ -105,6 +109,9 @@ async def run_search_discovery(max_pages: int = 2000) -> dict:
                     client, {"filter": "comingsoon"}, max_pages
                 ):
                     for row in rows:
+                        logger.debug(
+                            "search row appid=%s release_text=%r", row.appid, row.release_text
+                        )
                         parsed = parse_release(row.release_text)
                         if parsed.year == TARGET_YEAR:
                             await upsert_game(db, row.appid, row.name, parsed, coming_soon=True)
@@ -114,6 +121,43 @@ async def run_search_discovery(max_pages: int = 2000) -> dict:
 
     logger.info("Search discovery finished: %d games in %d catalog", found, TARGET_YEAR)
     return {"mode": "search", "found": found}
+
+
+async def run_targeted_discovery(appids: list[int]) -> dict:
+    """Check specific AppIDs without a full scan — for freshly listed games
+    the search passes missed (Steam-side indexing lag) or games previously
+    skipped whose metadata has since changed.
+
+    Runs the full Phase 3 store validation/collection directly (appdetails +
+    store tags + classification), so the game lands complete and queued for
+    market data — the never-guess-a-date rule applies unchanged."""
+    from scraper.collectors.store_data import (
+        APPDETAILS_MIN_INTERVAL as DETAILS_INTERVAL,
+        STORE_PAGE_MIN_INTERVAL as PAGE_INTERVAL,
+        collect_one,
+    )
+    from scraper.collectors.steam_sources import AGE_GATE_COOKIES
+
+    results: dict[int, str] = {}
+    async with make_session() as http:
+        http.cookie_jar.update_cookies(AGE_GATE_COOKIES)
+        details_client = SteamClient(http, min_interval=DETAILS_INTERVAL)
+        page_client = SteamClient(http, min_interval=PAGE_INTERVAL)
+
+        async with async_session_factory() as db:
+            for appid in appids:
+                try:
+                    status, reason = await collect_one(db, details_client, page_client, appid)
+                except Exception as exc:
+                    status, reason = SyncStatus.FAILED, str(exc)[:200]
+                    logger.warning("Targeted check failed for %s: %s", appid, exc)
+                await mark(db, appid, SyncStage.DISCOVERY, status)
+                await mark(db, appid, SyncStage.STORE_DATA, status,
+                           None if reason == "ok" else reason)
+                await db.commit()
+                results[appid] = f"{status.value} ({reason})"
+                logger.info("Targeted %s -> %s", appid, results[appid])
+    return {"mode": "targeted", "results": results}
 
 
 async def run_applist_discovery(limit: int = 500) -> dict:
