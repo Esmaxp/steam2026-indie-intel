@@ -1,0 +1,4 @@
+{
+  "_docs": "Manual video list for platforms without a usable public API (TikTok, Instagram, X) — and optional extra YouTube/Twitch entries. Add objects to 'videos'. Fields: platform (tiktok|instagram|x|youtube|twitch), url (required), title (required), thumbnail (optional image URL), published_at (optional ISO date, e.g. 2026-08-01).",
+  "videos": []
+}

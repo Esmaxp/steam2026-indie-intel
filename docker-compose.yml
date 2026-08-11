@@ -151,6 +151,13 @@
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8000
     restart: unless-stopped
+    environment:
+      # Community Clips server-side keys (empty = platform gracefully skipped)
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      YOUTUBE_CHANNEL_ID: ${YOUTUBE_CHANNEL_ID:-}
+      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
+      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+      TWITCH_USER_LOGIN: ${TWITCH_USER_LOGIN:-}
     depends_on:
       backend:
         condition: service_healthy
