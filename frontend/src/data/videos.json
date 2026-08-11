@@ -1,4 +1,41 @@
 {
-  "_docs": "Manual video list for platforms without a usable public API (TikTok, Instagram, X) — and optional extra YouTube/Twitch entries. Add objects to 'videos'. Fields: platform (tiktok|instagram|x|youtube|twitch), url (required), title (required), thumbnail (optional image URL), published_at (optional ISO date, e.g. 2026-08-01).",
-  "videos": []
+  "_docs": "Manual video list for platforms without a usable public API (TikTok, Instagram, X) — and optional extra YouTube/Twitch entries. Fields: platform (tiktok|instagram|x|youtube|twitch), url (required), title (required), thumbnail (optional), published_at (optional ISO date). The current entries are REAL videos from Steam's official YouTube channel, added as demo content — replace them with your own.",
+  "videos": [
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=sfM6IOizfNU",
+      "title": "Steam Cyberpunk Fest 2026: Official Trailer",
+      "thumbnail": "https://i.ytimg.com/vi/sfM6IOizfNU/mqdefault.jpg"
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=-SgXTZEmWRY",
+      "title": "Steam Train Fest 2026: Official Trailer",
+      "thumbnail": "https://i.ytimg.com/vi/-SgXTZEmWRY/mqdefault.jpg"
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=jLr20C7g37c",
+      "title": "Steam Social Deduction Fest 2026: Official Trailer",
+      "thumbnail": "https://i.ytimg.com/vi/jLr20C7g37c/mqdefault.jpg"
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=LDo3lrlQdMQ",
+      "title": "Steam Summer Sale 2026: Official Trailer",
+      "thumbnail": "https://i.ytimg.com/vi/LDo3lrlQdMQ/mqdefault.jpg"
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=ttADYTZSymw",
+      "title": "Steam Next Fest - June 2026 Edition: Intro Video",
+      "thumbnail": "https://i.ytimg.com/vi/ttADYTZSymw/mqdefault.jpg"
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=U4fjn5OzQWM",
+      "title": "Steam Next Fest - June 2026 Edition: Official Trailer",
+      "thumbnail": "https://i.ytimg.com/vi/U4fjn5OzQWM/mqdefault.jpg"
+    }
+  ]
 }

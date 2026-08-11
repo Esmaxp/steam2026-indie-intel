@@ -34,16 +34,26 @@ from app.models.media import MediaAsset
 from app.models.stats import SteamStats
 from app.models.sync import SyncState
 from app.models.taxonomy import Genre, Tag
+from app.models.videos import (
+    ApiUsageDaily,
+    ChannelSubmission,
+    GameChannels,
+    VideoCache,
+    WebsiteScan,
+)
 
 __all__ = [
+    "ApiUsageDaily",
     "BudgetEstimate",
     "Camera",
+    "ChannelSubmission",
     "ControllerSupport",
     "DataStatus",
     "Developer",
     "Dimension",
     "Festival",
     "Game",
+    "GameChannels",
     "GameEngine",
     "Genre",
     "GraphicsStyle",
@@ -60,6 +70,8 @@ __all__ = [
     "SyncState",
     "SyncStatus",
     "Tag",
+    "VideoCache",
+    "WebsiteScan",
     "WishlistRecord",
     "game_developers",
     "game_festivals",

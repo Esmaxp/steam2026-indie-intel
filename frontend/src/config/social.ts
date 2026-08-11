@@ -10,7 +10,8 @@ export interface SocialAccount {
 }
 
 export const SOCIAL_ACCOUNTS: SocialAccount[] = [
-  { platform: "youtube", label: "YouTube", url: "" },   // e.g. https://www.youtube.com/@yourchannel
+  // DEMO: Steam's official channel — replace with your own channel URL.
+  { platform: "youtube", label: "YouTube", url: "https://www.youtube.com/@Steam" },
   { platform: "twitch", label: "Twitch", url: "" },     // e.g. https://www.twitch.tv/yourname
   { platform: "tiktok", label: "TikTok", url: "" },     // e.g. https://www.tiktok.com/@yourname
   { platform: "instagram", label: "Instagram", url: "" },

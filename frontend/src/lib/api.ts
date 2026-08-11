@@ -1,8 +1,11 @@
 import type {
+  ChannelSubmissionBody,
+  ChannelSubmissionOut,
   DashboardSummary,
   FilterOptions,
   GameDetail,
   GameListItem,
+  GameVideosPayload,
   Page,
   StatsPoint,
 } from "@/lib/types";
@@ -47,4 +50,61 @@ export function fetchSummary() {
 
 export function fetchFilterOptions() {
   return getJson<FilterOptions>("/api/v1/filters/options");
+}
+
+export function fetchGameVideos(appid: number) {
+  return getJson<GameVideosPayload>(`/api/v1/games/${appid}/videos`);
+}
+
+async function postJson<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `API ${res.status}`;
+    try {
+      const data = await res.json();
+      if (typeof data.detail === "string") detail = data.detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
+export function submitGameChannels(appid: number, body: ChannelSubmissionBody) {
+  return postJson<{ status: string }>(`/api/v1/games/${appid}/channel-submissions`, body);
+}
+
+export function fetchSubmissions(token: string, status = "pending") {
+  return fetch(`${API_BASE}/api/v1/admin/channel-submissions?status=${status}`, {
+    headers: { "X-Admin-Token": token },
+  }).then(async (res) => {
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `API ${res.status}`);
+    return res.json() as Promise<ChannelSubmissionOut[]>;
+  });
+}
+
+export function reviewSubmission(token: string, id: number, action: "approve" | "reject", note = "") {
+  return postJson<ChannelSubmissionOut>(
+    `/api/v1/admin/channel-submissions/${id}/${action}`,
+    { note },
+    { "X-Admin-Token": token },
+  );
+}
+
+export function bulkReviewSubmissions(
+  token: string,
+  ids: number[],
+  action: "approve" | "reject",
+  note = "",
+) {
+  return postJson<{ processed: number[]; skipped: number[] }>(
+    "/api/v1/admin/channel-submissions/bulk-review",
+    { ids, action, note },
+    { "X-Admin-Token": token },
+  );
 }

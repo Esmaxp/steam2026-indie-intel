@@ -142,6 +142,7 @@ def build_detail(
     return GameDetail(
         **base.model_dump(),
         short_description=game.short_description,
+        website=game.website or None,  # '' means "checked, none reported"
         supported_languages=game.supported_languages or [],
         controller_support=_enum_value(game.controller_support),
         steam_deck_support=_enum_value(game.steam_deck_support),

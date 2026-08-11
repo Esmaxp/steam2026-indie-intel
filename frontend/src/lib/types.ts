@@ -133,6 +133,7 @@ export interface MarketingOut {
 
 export interface GameDetail extends GameListItem {
   short_description: string | null;
+  website: string | null;
   supported_languages: string[];
   controller_support: string;
   steam_deck_support: string;
@@ -164,6 +165,53 @@ export interface BudgetEstimateOut {
   source_name: string | null;
   source_url: string | null;
   computed_at: string;
+}
+
+export interface GameClip {
+  platform: string;
+  title: string;
+  url: string;
+  thumbnail: string | null;
+  published_at: string | null;
+  views: number | null;
+  source: "api" | "manual";
+}
+
+export interface GameVideosPayload {
+  /** stale = expired cache served because the API quota/fetch was blocked. */
+  status: "ok" | "stale" | "no_channels" | "quota_exhausted";
+  clips: GameClip[];
+  unavailable: { platform: string; reason?: string; error?: string }[];
+  fetched_at: string | null;
+  channels: {
+    youtube_url: string | null;
+    twitch_login: string | null;
+    manual_links: { platform: string; url: string }[];
+  } | null;
+}
+
+export interface ChannelSubmissionBody {
+  youtube_url: string;
+  twitch_login: string;
+  links: string[];
+  /** Honeypot — must stay empty; the field is visually hidden. */
+  nickname: string;
+}
+
+export interface ChannelSubmissionOut {
+  id: number;
+  appid: number;
+  game_name: string | null;
+  youtube_url: string | null;
+  twitch_login: string | null;
+  other_links: { platform: string; url: string }[];
+  source: "developer_submitted" | "auto_detected";
+  /** Auto-detected only: the official website the links were found on. */
+  found_on: string | null;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  reviewed_at: string | null;
+  review_note: string | null;
 }
 
 export interface Page<T> {

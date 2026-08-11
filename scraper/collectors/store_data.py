@@ -247,6 +247,8 @@ async def collect_one(
         "supported_languages": parse_supported_languages(details.get("supported_languages")),
         "header_image_url": details.get("header_image"),
         "capsule_image_url": details.get("capsule_image") or details.get("capsule_imagev5"),
+        # '' = appdetails checked, no website listed (backfill worker skips it).
+        "website": (details.get("website") or "").strip(),
         "dimension": result.dimension,
         "camera": result.camera,
         "graphics_style": result.graphics_style,

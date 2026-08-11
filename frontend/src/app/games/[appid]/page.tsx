@@ -16,6 +16,7 @@ import {
   labelFor,
 } from "@/lib/format";
 import type { GameDetail, Provenanced } from "@/lib/types";
+import { GameVideos } from "@/components/game-videos";
 import { SimilarGamesList } from "@/components/similar-games-search";
 import { StatsHistoryChart } from "@/components/stats-history-chart";
 import { StatusBadge } from "@/components/status-badge";
@@ -187,6 +188,16 @@ export default function GamePage({
                   className="inline-flex items-center gap-1 text-ink2 hover:underline"
                 >
                   SteamDB <ExternalLink size={12} aria-hidden />
+                </a>
+              ) : null}
+              {game.website ? (
+                <a
+                  href={game.website}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-ink2 hover:underline"
+                >
+                  Official Website <ExternalLink size={12} aria-hidden />
                 </a>
               ) : null}
             </div>
@@ -365,6 +376,8 @@ export default function GamePage({
           </Card>
         </div>
       </div>
+
+      <GameVideos appid={game.appid} />
 
       <StatsHistoryChart appid={game.appid} />
 

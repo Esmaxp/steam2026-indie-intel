@@ -35,6 +35,9 @@ class Game(Base, TimestampMixin):
 
     steam_store_url: Mapped[str | None] = mapped_column(Text)
     steamdb_url: Mapped[str | None] = mapped_column(Text)
+    # Official website from Steam appdetails. NULL = never checked,
+    # '' = checked and Steam reports none (stops the backfill re-fetching it).
+    website: Mapped[str | None] = mapped_column(Text)
 
     # Release info. Steam returns free-form strings ("Q1 2026", "Coming soon"),
     # so the raw value is kept next to the parsed date.

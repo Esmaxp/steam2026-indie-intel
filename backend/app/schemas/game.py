@@ -156,6 +156,7 @@ class RevenueEstimateOut(BaseModel):
 
 class GameDetail(GameListItem):
     short_description: str | None = None
+    website: str | None = None
     supported_languages: list[str] = []
     controller_support: str = "unknown"
     steam_deck_support: str = "unknown"

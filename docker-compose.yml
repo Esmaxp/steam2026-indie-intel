@@ -24,6 +24,12 @@
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
       APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Per-game community videos (lazy fetch) — empty = platform skipped.
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
+      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+      # Required for the channel-submission review endpoints.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -98,6 +104,44 @@
       - ./logs:/data/logs
     command: ["python", "-m", "scraper.collectors.run_market"]
 
+  # Low-priority backfill — run occasionally:  docker compose run --rm websites [--limit 300]
+  websites:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.backfill_websites"]
+
+  # Channel discovery — run in batches:  docker compose run --rm scanner [--limit 200]
+  scanner:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.scan_websites"]
+
   # Scheduled worker — run daily:  docker compose run --rm refresher
   refresher:
     build:
@@ -117,6 +161,56 @@
     volumes:
       - ./logs:/data/logs
     command: ["python", "-m", "workers.refresh_stats"]
+
+  # Quick-start seed — real data in ~10 minutes on a fresh clone:
+  #   docker compose run --rm seed
+  # Discovers ~100 games from Steam Search (2 pages), then collects full
+  # store data for the first 50. Safe to re-run; safe to interrupt.
+  seed:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command:
+      - sh
+      - -c
+      - |
+        python -m scraper.discovery.run --mode search --max-pages 2 &&
+        python -m scraper.collectors.run --limit 50
+
+  # Warm the video cache for approved games:  docker compose run --rm video_prefetch [--limit 200]
+  video_prefetch:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Worker containers don't read .env themselves — compose must inject these.
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
+      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.prefetch_videos"]
 
   # Full pipeline:  docker compose run --rm pipeline
   # discovery → store data for ALL queued games → market data for ALL queued games
