@@ -333,54 +333,6 @@ export default function GamePage({
             </div>
           </Card>
 
-          {game.revenue_estimates.length > 0 ? (
-            <Card className="p-5">
-              <h2 className="mb-3 text-sm font-medium text-muted">
-                Estimate sources (each with link + date)
-              </h2>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-grid text-left text-muted">
-                    <th className="py-1 pr-2">Source</th>
-                    <th className="py-1 pr-2">Revenue</th>
-                    <th className="py-1 pr-2">Sales</th>
-                    <th className="py-1">Owners</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {game.revenue_estimates.map((estimate, i) => (
-                    <tr key={i} className="border-b border-grid/60 last:border-0">
-                      <td className="py-1.5 pr-2">
-                        <a
-                          href={estimate.source_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-accent hover:underline"
-                        >
-                          {estimate.source_name}
-                        </a>
-                        <span className="ml-1 text-muted">
-                          {new Date(estimate.retrieved_at).toLocaleDateString("en-GB")}
-                        </span>
-                      </td>
-                      <td className="py-1.5 pr-2 tabular-nums">
-                        {fmtMoney(estimate.revenue_usd)}
-                      </td>
-                      <td className="py-1.5 pr-2 tabular-nums">
-                        {fmtCompact(estimate.estimated_sales)}
-                      </td>
-                      <td className="py-1.5 tabular-nums">
-                        {estimate.owners_min !== null || estimate.owners_max !== null
-                          ? `${fmtCompact(estimate.owners_min)}–${fmtCompact(estimate.owners_max)}`
-                          : DASH}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-          ) : null}
-
           <Card className="p-5">
             <h2 className="mb-3 text-sm font-medium text-muted">Review statistics</h2>
             {game.latest_stats ? (
@@ -471,14 +423,18 @@ export default function GamePage({
 
       {(game.wishlist_history.length > 0 || game.revenue_history.length > 0) && (
         <Card className="p-5">
+          {/* Only developer-disclosed figures reach these tables now: the
+              vendor collectors were retired and their rows deleted in
+              migration 0012. Kept because disclosed_numbers_source.py still
+              writes CONFIRMED rows here, and those are worth showing. */}
           <h2 className="mb-3 text-sm font-medium text-muted">
-            Business data history (all records carry status + source)
+            Disclosed figures (stated publicly by the developer, with source)
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-grid text-left text-xs text-muted">
-                  <th className="py-1.5 pr-4">Recorded</th>
+                  <th className="py-1.5 pr-4">Disclosed</th>
                   <th className="py-1.5 pr-4">Metric</th>
                   <th className="py-1.5 pr-4">Value</th>
                   <th className="py-1.5 pr-4">Status</th>
@@ -489,10 +445,14 @@ export default function GamePage({
                 {game.wishlist_history.map((w, i) => (
                   <tr key={`w${i}`} className="border-b border-grid/60">
                     <td className="py-1.5 pr-4 tabular-nums">
-                      {new Date(w.recorded_at).toLocaleDateString("en-GB")}
+                      {/* The announcement's own date when known; ingestion
+                          time is not the observation date. */}
+                      {fmtDate(w.disclosed_on ?? w.recorded_at)}
                     </td>
                     <td className="py-1.5 pr-4">Wishlist</td>
-                    <td className="py-1.5 pr-4 tabular-nums">{fmtCompact(w.wishlist_count)}</td>
+                    <td className="py-1.5 pr-4 tabular-nums">
+                      {fmtWishlist(w.wishlist_count, w.comparator)}
+                    </td>
                     <td className="py-1.5 pr-4"><StatusBadge status={w.status} /></td>
                     <td className="py-1.5">
                       {w.source_url ? (
@@ -508,7 +468,7 @@ export default function GamePage({
                 {game.revenue_history.map((r, i) => (
                   <tr key={`r${i}`} className="border-b border-grid/60 last:border-0">
                     <td className="py-1.5 pr-4 tabular-nums">
-                      {new Date(r.recorded_at).toLocaleDateString("en-GB")}
+                      {fmtDate(r.recorded_at)}
                     </td>
                     <td className="py-1.5 pr-4">Revenue</td>
                     <td className="py-1.5 pr-4 tabular-nums">{fmtMoney(r.gross_revenue_usd)}</td>

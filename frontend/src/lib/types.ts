@@ -133,6 +133,10 @@ export interface FestivalOut {
 export interface WishlistRecordOut {
   status: DataStatus;
   wishlist_count: number | null;
+  /** ">=" when the developer stated a lower bound ("over 100,000"). */
+  comparator: string;
+  /** The announcement's date; recorded_at is only when we ingested it. */
+  disclosed_on: string | null;
   source_name: string | null;
   source_url: string | null;
   recorded_at: string;
