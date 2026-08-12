@@ -33,9 +33,15 @@ from scraper.common.http import SteamClient
 logger = logging.getLogger(__name__)
 
 MEMBERS_URL = "https://steamcommunity.com/games/{appid}/members"
+# Pin the language: Steam localises number formatting, and a page served with
+# space- or dot-grouped digits would not match a comma-only pattern — the
+# parser would return None and the game would be recorded as having no hub.
+MEMBERS_PARAMS = {"l": "english"}
 
-# The rendered paging line, e.g. "1 - 50 of 444,315 Members".
-_COUNT_RE = re.compile(r"of\s+([\d,]+)\s+Members", re.I)
+# The rendered paging line, e.g. "1 - 50 of 444,315 Members". Grouping may be
+# by comma, dot, space, NBSP or thin space depending on locale, so all are
+# accepted and stripped before parsing (belt and braces alongside l=english).
+_COUNT_RE = re.compile(r"of\s+([\d][\d.,   ]*\d|\d)\s+Members", re.I)
 # Fallback if Valve rewords the paging line: the same figure is emitted in
 # the page's own JS bootstrap on hub pages.
 _FALLBACK_RE = re.compile(r'"?member_?count"?\s*[:=]\s*"?(\d+)', re.I)
@@ -61,7 +67,8 @@ def parse_members_count(html: str) -> int | None:
     """
     match = _COUNT_RE.search(html)
     if match:
-        return int(match.group(1).replace(",", ""))
+        digits = re.sub(r"[.,  \s]", "", match.group(1))
+        return int(digits) if digits.isdigit() else None
     match = _FALLBACK_RE.search(html)
     if match:
         return int(match.group(1))
@@ -71,7 +78,7 @@ def parse_members_count(html: str) -> int | None:
 async def fetch_followers(client: SteamClient, appid: int) -> FollowerCount | None:
     """None when the game has no community hub, or the page shape changed."""
     url = MEMBERS_URL.format(appid=appid)
-    html = await client.get_text(url)
+    html = await client.get_text(url, params=MEMBERS_PARAMS)
     count = parse_members_count(html)
     if count is None:
         logger.debug("no_community_group or unparsable members page for %s", appid)

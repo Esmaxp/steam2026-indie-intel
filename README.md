@@ -103,6 +103,7 @@ in order; each states its expected outcome.
 | websites | Backfill `games.website` from Steam | – | no (profile: scrape) | `docker compose run --rm websites [--limit 300]` |
 | scanner | Detect social channels on game websites | – | no (profile: scrape) | `docker compose run --rm scanner [--limit 200]` |
 | video_prefetch | Warm per-game video cache | – | no (profile: scrape) | `docker compose run --rm video_prefetch [--limit 200]` |
+| tests | Unit tests (pure functions, no DB) | – | no (profile: scrape) | `docker compose run --rm tests` |
 
 Community-video flow (all optional, needs `YOUTUBE_API_KEY` / `TWITCH_*` keys
 for actual videos): `websites` → `scanner` → review at
@@ -173,6 +174,23 @@ NEXT_PUBLIC_API_URL=http://localhost:9100 npm run dev
 # Windows (PowerShell):
 $env:NEXT_PUBLIC_API_URL="http://localhost:9100"; npm run dev
 ```
+
+## Tests
+
+```bash
+docker compose run --rm tests                                  # whole suite
+docker compose run --rm tests python -m pytest tests/test_search_parse.py -v
+```
+
+No database and no network: every test is a pure-function test over saved
+real payloads in `tests/fixtures/`. That is the point — these parsers fail
+**silently**. A Steam markup change makes them return zero rows or `None`
+rather than raising, and the result would be a shipped column quietly going
+blank or, worse, filling with wrong values. The fixtures pin the shapes that
+were observed live.
+
+Locally without Docker: `pip install -e "./backend[dev]" && pytest` from the
+repo root.
 
 ## Project phases
 

@@ -103,6 +103,21 @@
       - ./logs:/data/logs
     command: ["python", "-m", "scraper.collectors.run_market"]
 
+  # Unit tests — pure functions, no database, no network:
+  #   docker compose run --rm tests
+  #   docker compose run --rm tests python -m pytest tests/test_search_parse.py -v
+  tests:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./tests:/srv/tests:ro
+      - ./pytest.ini:/srv/pytest.ini:ro
+    command: ["python", "-m", "pytest"]
+
   # Developer-disclosed wishlist counts from official Steam news:
   #   docker compose run --rm disclosures [--limit 500] [--write]
   # Writes CONFIRMED rows, so it defaults to a dry run: without --write it
