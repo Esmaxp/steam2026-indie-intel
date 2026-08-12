@@ -69,6 +69,12 @@ def latest_wishlist_sq():
         .order_by(
             WishlistRecord.appid,
             status_priority(WishlistRecord.status),
+            # disclosed_on before recorded_at: a harvest ingests a game's
+            # whole milestone history in ONE transaction, so every row shares
+            # recorded_at and it cannot break the tie. Ordering on it alone
+            # surfaced an arbitrary row -- a game that had announced 50,000
+            # displayed its oldest 20,000 milestone.
+            WishlistRecord.disclosed_on.desc().nullslast(),
             WishlistRecord.recorded_at.desc(),
         )
         .subquery("latest_wishlist")

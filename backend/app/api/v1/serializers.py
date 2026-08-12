@@ -190,6 +190,8 @@ def build_detail(
             WishlistRecordOut(
                 status=_enum_value(w.status),
                 wishlist_count=w.wishlist_count,
+                comparator=w.comparator or "=",
+                disclosed_on=w.disclosed_on,
                 source_name=w.source_name,
                 source_url=w.source_url,
                 recorded_at=w.recorded_at,

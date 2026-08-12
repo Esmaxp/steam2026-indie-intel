@@ -228,7 +228,13 @@ async def get_game(appid: int, db: AsyncSession = Depends(get_db)) -> GameDetail
             await db.execute(
                 sa.select(WishlistRecord)
                 .where(WishlistRecord.appid == appid)
-                .order_by(WishlistRecord.recorded_at.desc())
+                # Newest DISCLOSURE first. A harvest writes a game's whole
+                # milestone history in one transaction, so recorded_at is
+                # identical across rows and cannot order them.
+                .order_by(
+                    WishlistRecord.disclosed_on.desc().nullslast(),
+                    WishlistRecord.recorded_at.desc(),
+                )
             )
         )
         .scalars()

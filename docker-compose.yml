@@ -103,6 +103,28 @@
       - ./logs:/data/logs
     command: ["python", "-m", "scraper.collectors.run_market"]
 
+  # Developer-disclosed wishlist counts from official Steam news:
+  #   docker compose run --rm disclosures [--limit 500] [--write]
+  # Writes CONFIRMED rows, so it defaults to a dry run: without --write it
+  # only emits a CSV to ./logs for a human to review first.
+  disclosures:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.harvest_disclosures"]
+
   # Community-hub follower counts — run daily in bounded batches:
   #   docker compose run --rm followers [--limit 500] [--dry-run]
   # Keyless first-party. A full 5.6k-game sweep is ~6h at 4s spacing, so

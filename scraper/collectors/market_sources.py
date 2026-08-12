@@ -128,9 +128,15 @@ def find_next_fest_mentions(news_items: list[dict]) -> list[NextFestMention]:
     return mentions
 
 
-async def fetch_next_fest_mentions(client: SteamClient, appid: int) -> list[NextFestMention]:
+async def fetch_news_items(client: SteamClient, appid: int) -> list[dict]:
+    """Raw Steam news items — the single fetch behind every news-derived
+    feature, so one request per game serves both Next Fest detection and
+    wishlist-disclosure harvesting."""
     data = await client.get_json(
         NEWS_URL, params={"appid": appid, "count": 100, "maxlength": 0, "format": "json"}
     )
-    items = (data.get("appnews") or {}).get("newsitems") or []
-    return find_next_fest_mentions(items)
+    return (data.get("appnews") or {}).get("newsitems") or []
+
+
+async def fetch_next_fest_mentions(client: SteamClient, appid: int) -> list[NextFestMention]:
+    return find_next_fest_mentions(await fetch_news_items(client, appid))
