@@ -84,6 +84,7 @@ class GameFilters:
     camera: Camera | None = None
     graphics_style: GraphicsStyle | None = None
     demo_available: bool | None = None
+    has_website: bool | None = None
     next_fest: bool | None = None
     release_status: str = "all"  # released | upcoming | all
     early_access: bool | None = None
@@ -164,6 +165,10 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         conds.append(Game.graphics_style == f.graphics_style)
     if f.demo_available is not None:
         conds.append(Game.demo_available.is_(f.demo_available))
+    if f.has_website is not None:
+        # '' means "checked, none listed"; NULL means never checked — neither counts.
+        has_site = sa.and_(Game.website.is_not(None), Game.website != "")
+        conds.append(has_site if f.has_website else sa.not_(has_site))
     if f.next_fest is not None:
         conds.append(nf if f.next_fest else sa.not_(nf))
     if f.release_status == "released":

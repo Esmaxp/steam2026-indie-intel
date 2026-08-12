@@ -53,6 +53,9 @@ async def list_games(
     camera: Camera | None = None,
     graphics_style: GraphicsStyle | None = None,
     demo_available: bool | None = None,
+    has_website: bool | None = Query(
+        None, description="True = only games with an official website on record"
+    ),
     next_fest: bool | None = None,
     release_status: str = Query(
         "all",
@@ -84,7 +87,7 @@ async def list_games(
     filters = GameFilters(
         q=q, developer=developer, publisher=publisher, genre=genre, tag=tag,
         engine=engine, dimension=dimension, camera=camera, graphics_style=graphics_style,
-        demo_available=demo_available, next_fest=next_fest,
+        demo_available=demo_available, has_website=has_website, next_fest=next_fest,
         release_status=release_status,
         early_access=early_access, free=free, release_month=release_month,
         min_reviews=min_reviews, min_positive_pct=min_positive_pct,

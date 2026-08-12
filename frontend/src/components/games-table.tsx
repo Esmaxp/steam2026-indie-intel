@@ -358,13 +358,26 @@ function ExpandedRow({ game }: { game: GameListItem }) {
         </div>
       ) : null}
 
-      <Link
-        href={`/games/${game.appid}`}
-        onClick={(e) => e.stopPropagation()}
-        className="w-fit text-sm text-accent hover:underline"
-      >
-        Full details →
-      </Link>
+      <div className="flex items-center gap-4 text-sm">
+        <Link
+          href={`/games/${game.appid}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-accent hover:underline"
+        >
+          Full details →
+        </Link>
+        {detail.website ? (
+          <a
+            href={detail.website}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-ink2 hover:underline"
+          >
+            Official Website <ExternalLink size={12} aria-hidden />
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }

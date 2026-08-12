@@ -176,6 +176,7 @@ export function FiltersBar() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <ParamToggle paramKey="demo_available" label="Has demo" />
+        <ParamToggle paramKey="has_website" label="Has website" />
         <ParamToggle paramKey="next_fest" label="Next Fest" />
         <ReleaseStatusControl />
         <ParamToggle paramKey="early_access" label="Early Access" />
