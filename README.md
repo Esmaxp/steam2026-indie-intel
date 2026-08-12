@@ -28,6 +28,10 @@ in order; each states its expected outcome.
    docker compose up --build -d
    ```
 
+   Day to day, `./scripts/start-all.sh` restarts the stack and waits until it
+   is actually serving before returning (`--build` to rebuild, `--logs` to
+   follow, `--stop` to shut down).
+
    Alembic migrations apply automatically when the backend container starts.
    First build takes a few minutes (Next.js production build).
 
