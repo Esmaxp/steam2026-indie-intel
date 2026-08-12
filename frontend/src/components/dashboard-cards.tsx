@@ -53,8 +53,6 @@ export function DashboardCards() {
     );
   }
 
-  const avgW = avgTile(data.avg_wishlist);
-  const avgR = avgTile(data.avg_revenue);
   const avgRev = avgTile(data.avg_reviews);
 
   return (
@@ -67,8 +65,23 @@ export function DashboardCards() {
       <Tile label="With demo" value={fmtInt(data.games_with_demo)} />
       <Tile label="Next Fest" value={fmtInt(data.next_fest_games)} />
       <Tile label="Avg reviews" value={avgRev.value} hint={avgRev.hint} />
-      <Tile label="Avg wishlist" value={avgW.value} hint={`estimated · ${avgW.hint ?? ""}`} />
-      <Tile label="Avg revenue" value={avgR.value} hint={`estimated · ${avgR.hint ?? ""}`} />
+      {/* Coverage counters, not averages. Averaging a handful of disclosed
+          lower bounds would invent a precision the data does not have. */}
+      <Tile
+        label="With followers"
+        value={fmtInt(data.games_with_followers)}
+        hint="measured from Steam hubs"
+      />
+      <Tile
+        label="On wishlist chart"
+        value={fmtInt(data.ranked_games)}
+        hint="Valve Top Wishlists position"
+      />
+      <Tile
+        label="Wishlists disclosed"
+        value={fmtInt(data.confirmed_wishlist_games)}
+        hint="confirmed by the developer"
+      />
     </div>
   );
 }

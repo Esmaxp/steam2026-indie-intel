@@ -32,9 +32,9 @@ in order; each states its expected outcome.
    First build takes a few minutes (Next.js production build).
 
    Expected outcome:
-   - `GET http://localhost:8000/health` returns 200 with
+   - `GET http://localhost:9100/health` returns 200 with
      `{"status":"ok","database":"ok"}`
-   - http://localhost:3000 loads the dashboard (empty until step 3)
+   - http://localhost:4000 loads the dashboard (empty until step 3)
 
 3. **Load data — pick ONE of the three options below.**
 
@@ -76,10 +76,10 @@ in order; each states its expected outcome.
 ### Verify your setup
 
 - [ ] `docker compose ps` shows `db`, `backend`, `frontend` running (healthy)
-- [ ] `curl http://localhost:8000/health` → `{"status":"ok","database":"ok"}`
-- [ ] http://localhost:8000/docs renders the API docs
-- [ ] http://localhost:3000 loads; after step 3 the games table lists ≥ 25 games
-- [ ] `curl "http://localhost:8000/api/v1/games?page_size=1"` returns JSON with
+- [ ] `curl http://localhost:9100/health` → `{"status":"ok","database":"ok"}`
+- [ ] http://localhost:9100/docs renders the API docs
+- [ ] http://localhost:4000 loads; after step 3 the games table lists ≥ 25 games
+- [ ] `curl "http://localhost:9100/api/v1/games?page_size=1"` returns JSON with
       `"total"` ≥ 25
 
 ## Services
@@ -90,9 +90,9 @@ in order; each states its expected outcome.
 
 | Service | Purpose | Port | Auto-start? | Run with |
 |---|---|---|---|---|
-| db | PostgreSQL 16 storage | 5432 | yes | `docker compose up` |
-| backend | FastAPI REST API + migrations | 8000 | yes | `docker compose up` |
-| frontend | Next.js dashboard | 3000 | yes | `docker compose up` |
+| db | PostgreSQL 16 storage | 9432 | yes | `docker compose up` |
+| backend | FastAPI REST API + migrations | 9100 | yes | `docker compose up` |
+| frontend | Next.js dashboard | 4000 | yes | `docker compose up` |
 | db_restore | Restore the committed full-catalog snapshot | – | no (profile: scrape) | `docker compose run --rm db_restore` |
 | seed | Quick-start data seed (~50 games) | – | no (profile: scrape) | `docker compose run --rm seed` |
 | discovery | Find 2026 indie games on Steam | – | no (profile: scrape) | `docker compose run --rm discovery [--mode search\|applist]` |
@@ -106,7 +106,7 @@ in order; each states its expected outcome.
 
 Community-video flow (all optional, needs `YOUTUBE_API_KEY` / `TWITCH_*` keys
 for actual videos): `websites` → `scanner` → review at
-http://localhost:3000/admin/submissions (token = `ADMIN_TOKEN` from `.env`) →
+http://localhost:4000/admin/submissions (token = `ADMIN_TOKEN` from `.env`) →
 `video_prefetch`.
 
 ## Data honesty
@@ -127,9 +127,13 @@ methods, formulas and inputs stored for audit — see ARCHITECTURE.md §9).
 
 ## Troubleshooting
 
-- **Port already in use** (5432/8000/3000): stop the conflicting process, or
+- **Port already in use** (9432/9100/4000): stop the conflicting process, or
   change `POSTGRES_PORT` in `.env` (database) / edit the `ports:` mapping in
   `docker-compose.yml` (backend/frontend), then `docker compose up -d`.
+  Only ever change the **left** (host) side of a `ports:` mapping — the right
+  side is the container-internal port the process actually listens on.
+  Moving the backend also means updating `NEXT_PUBLIC_API_URL` (compose build
+  arg) and the CORS origin in `backend/app/main.py`.
 - **Backend unhealthy / migrations pending**: `docker compose logs backend` —
   the container runs `alembic upgrade head` on start; a failure there is
   almost always the db not being ready yet (compose waits on its healthcheck,
@@ -154,9 +158,9 @@ python -m venv .venv && source .venv/bin/activate
 python -m venv .venv; .venv\Scripts\Activate.ps1
 pip install -e .
 # .env's DATABASE_URL uses host "db" (Docker); for local dev point it at localhost:
-export DATABASE_URL=postgresql+asyncpg://steam:steam@localhost:5432/steam2026  # PowerShell: $env:DATABASE_URL="..."
+export DATABASE_URL=postgresql+asyncpg://steam:steam@localhost:9432/steam2026  # PowerShell: $env:DATABASE_URL="..."
 alembic upgrade head
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 9100
 ```
 
 Frontend:
@@ -165,9 +169,9 @@ Frontend:
 cd frontend
 npm install
 # Linux/macOS:
-NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+NEXT_PUBLIC_API_URL=http://localhost:9100 npm run dev
 # Windows (PowerShell):
-$env:NEXT_PUBLIC_API_URL="http://localhost:8000"; npm run dev
+$env:NEXT_PUBLIC_API_URL="http://localhost:9100"; npm run dev
 ```
 
 ## Project phases
@@ -177,8 +181,8 @@ $env:NEXT_PUBLIC_API_URL="http://localhost:8000"; npm run dev
 3. ✅ Steam data collector — `docker compose run --rm collector`
 4. ✅ Public market intelligence collector — `docker compose run --rm market`
    (or run the whole chain: `docker compose run --rm pipeline`)
-5. ✅ REST API — http://localhost:8000/docs (`/api/v1/games`, dashboard, filters)
-6. ✅ Frontend dashboard — http://localhost:3000 (`cd frontend && npm run dev` locally)
+5. ✅ REST API — http://localhost:9100/docs (`/api/v1/games`, dashboard, filters)
+6. ✅ Frontend dashboard — http://localhost:4000 (`cd frontend && npm run dev` locally)
 7. ✅ Charts & analytics — dashboard analytics grid + per-game stats history
 8. ✅ Export system — CSV / Excel / JSON / Markdown of the current filtered view
    (buttons above the table, or `GET /api/v1/export?format=csv&...`); copies land in `exports/`

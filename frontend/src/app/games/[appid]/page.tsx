@@ -9,10 +9,12 @@ import {
   DASH,
   fmtCompact,
   fmtDate,
+  fmtDelta,
   fmtInt,
   fmtMoney,
   fmtPct,
   fmtPriceCents,
+  fmtWishlist,
   labelFor,
 } from "@/lib/format";
 import type { GameDetail, Provenanced } from "@/lib/types";
@@ -252,52 +254,83 @@ export default function GamePage({
 
         <div className="flex flex-col gap-4">
           <Card className="p-5">
-            <h2 className="mb-3 text-sm font-medium text-muted">Business data</h2>
+            <h2 className="mb-3 text-sm font-medium text-muted">Demand signals</h2>
             <div className="grid grid-cols-2 gap-4">
-              <ProvenancedFact label="Wishlist" data={game.wishlist} />
+              {/* Measured — Valve publishes both of these. */}
+              <Fact label="Followers">
+                {game.followers === null ? (
+                  <span className="text-muted">{DASH}</span>
+                ) : (
+                  <>
+                    <span className="tabular-nums">{fmtInt(game.followers)}</span>
+                    <div className="text-xs text-muted">
+                      Steam hub members · {fmtDate(game.followers_captured_at)}
+                    </div>
+                  </>
+                )}
+              </Fact>
+              <Fact label="Followers Δ14d">
+                <span className="tabular-nums">{fmtDelta(game.follower_delta_14d)}</span>
+                {game.follower_delta_14d === null ? (
+                  <div className="text-xs text-muted">
+                    needs 14 days of snapshots
+                  </div>
+                ) : null}
+              </Fact>
+              <Fact label="Wishlist rank">
+                {game.wishlist_rank !== null ? (
+                  <>
+                    <span className="tabular-nums">#{game.wishlist_rank}</span>
+                    <div className="text-xs text-muted">
+                      Valve Top Wishlists — an order, not a count
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-muted">
+                    {game.is_released ? DASH : "Not ranked"}
+                  </span>
+                )}
+              </Fact>
+              <Fact label="Wishlists">
+                {game.wishlist.status === "confirmed" && game.wishlist.value !== null ? (
+                  <>
+                    <span className="tabular-nums">
+                      {fmtWishlist(game.wishlist.value, game.wishlist.comparator)}
+                    </span>
+                    <div className="text-xs text-muted">
+                      disclosed by the developer
+                      {game.wishlist.disclosed_on
+                        ? ` · ${fmtDate(game.wishlist.disclosed_on)}`
+                        : ""}
+                      {game.wishlist.source_url ? (
+                        <>
+                          {" · "}
+                          <a
+                            href={game.wishlist.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent hover:underline"
+                          >
+                            source
+                          </a>
+                        </>
+                      ) : null}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-muted">Unknown</span>
+                    <div className="text-xs text-muted">
+                      Steam publishes no wishlist counts; none is estimated here
+                    </div>
+                  </>
+                )}
+              </Fact>
               <ProvenancedFact label="Gross revenue" data={game.revenue} money />
               <Fact label="Est. sales">
                 <span className="tabular-nums">{fmtCompact(game.estimated_sales)}</span>
               </Fact>
-              <ProvenancedFact label="Budget" data={game.budget} money />
             </div>
-            {game.budget_estimates.length > 0 ? (
-              <details className="mt-3 border-t border-grid pt-3">
-                <summary className="cursor-pointer text-xs font-medium text-accent">
-                  How was the budget estimated?
-                </summary>
-                <div className="mt-2 flex flex-col gap-3">
-                  {game.budget_estimates.map((estimate, i) => (
-                    <div key={i} className="rounded-md border border-hairline p-3 text-xs">
-                      <div className="font-medium">
-                        {estimate.method === "team_cost"
-                          ? "Method A — team size × duration × regional cost"
-                          : "Method B — industry revenue-to-budget ratio"}
-                        :{" "}
-                        <span className="tabular-nums">
-                          {estimate.budget_min_usd === estimate.budget_max_usd
-                            ? fmtMoney(estimate.budget_min_usd)
-                            : `${fmtMoney(estimate.budget_min_usd)} – ${fmtMoney(estimate.budget_max_usd)}`}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-muted">
-                        Formula: <code>{estimate.formula}</code>
-                      </div>
-                      <ul className="mt-1 text-muted">
-                        {Object.entries(estimate.inputs).map(([key, value]) => (
-                          <li key={key}>
-                            {key}: <span className="text-ink2">{String(value)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="mt-1 text-muted">
-                        This is an explicitly labeled heuristic — not a fact.
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ) : null}
           </Card>
 
           {game.revenue_estimates.length > 0 ? (

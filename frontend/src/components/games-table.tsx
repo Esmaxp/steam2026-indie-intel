@@ -6,6 +6,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+import type { OnChangeFn, VisibilityState } from "@tanstack/react-table";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -16,15 +17,16 @@ import {
   ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { fetchGame, fetchGames } from "@/lib/api";
 import {
   DASH,
-  fmtCompact,
   fmtDate,
+  fmtDelta,
   fmtInt,
   fmtMoney,
   fmtPct,
+  fmtWishlist,
   labelFor,
 } from "@/lib/format";
 import type { GameListItem } from "@/lib/types";
@@ -32,6 +34,7 @@ import { useFilterParams } from "@/hooks/use-filter-params";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { ColumnPicker } from "@/components/column-picker";
 import { Pagination } from "@/components/pagination";
 
 const col = createColumnHelper<GameListItem>();
@@ -44,16 +47,40 @@ interface ExpandMeta {
 
 const GENRES_SHOWN = 4;
 
-/** Columns whose header click drives server-side sorting. */
+/** Columns hidden on a first visit — the widest, least-scanned ones.
+ *  Everything stays toggleable via the Columns menu. */
+const DEFAULT_COLUMN_VISIBILITY: VisibilityState = {
+  developer: false,
+  publisher: false,
+  tags: false,
+  // Ships dark: day-over-day rank volatility is not yet measured, so a small
+  // move cannot yet be distinguished from Valve's own reshuffling. Enable by
+  // default only after running scripts/rank_delta_report.py on sweeps ~24h
+  // apart. Still toggleable in the Columns menu meanwhile.
+  rank_delta_7d: false,
+};
+
+/** Survives reloads; bumped suffix invalidates old shapes after a column rename.
+ *  v2: budget column removed; followers/rank columns added. */
+const VISIBILITY_STORAGE_KEY = "steam2026.games-table.columns.v2";
+
+/** Columns whose header click drives server-side sorting.
+ *  No wishlist or revenue key: both are all-NULL columns, and disclosed
+ *  wishlist figures are mostly ">=" bounds that do not order meaningfully. */
 const SORTABLE: Record<string, string> = {
   name: "name",
   release_date: "release_date",
   total_reviews: "reviews",
   positive_pct: "positive_pct",
   peak_ccu: "peak_ccu",
-  wishlist: "wishlist",
-  revenue: "revenue",
+  followers: "followers",
+  follower_delta_14d: "follower_delta_14d",
+  wishlist_rank: "wishlist_rank",
+  rank_delta_7d: "rank_delta_7d",
 };
+
+/** Sort keys where ascending is the better value (rank 1 = top of chart). */
+const ASCENDING_IS_BETTER = new Set(["wishlist_rank"]);
 
 const columns = [
   col.display({
@@ -202,18 +229,127 @@ const columns = [
   }),
   col.accessor("peak_ccu", {
     id: "peak_ccu",
-    header: "Peak CCU",
+    header: () => (
+      <span title="Source: steamcharts.com (third party)">Peak CCU</span>
+    ),
     cell: (info) => <span className="tabular-nums">{fmtInt(info.getValue())}</span>,
+  }),
+  col.accessor("followers", {
+    id: "followers",
+    header: () => (
+      <span title="Steam community-hub members — a value Valve publishes. Exact, not an estimate.">
+        Followers
+      </span>
+    ),
+    cell: (info) => {
+      const game = info.row.original;
+      if (game.followers === null) return <span className="text-muted">{DASH}</span>;
+      return (
+        <div className="flex flex-col">
+          <span className="tabular-nums">{fmtInt(game.followers)}</span>
+          <span className="text-[10px] text-muted">
+            {fmtDate(game.followers_captured_at)}
+          </span>
+        </div>
+      );
+    },
+  }),
+  col.accessor("follower_delta_14d", {
+    id: "follower_delta_14d",
+    header: () => (
+      <span title="Change in followers over the last 14 days, from our own snapshots. Blank until two snapshots exist — never shown as zero.">
+        Followers Δ14d
+      </span>
+    ),
+    cell: (info) => {
+      const game = info.row.original;
+      if (game.follower_delta_14d === null)
+        return <span className="text-muted">{DASH}</span>;
+      const up = game.follower_delta_14d > 0;
+      return (
+        <div className="flex flex-col">
+          <span className={`tabular-nums ${up ? "text-good-text" : "text-ink2"}`}>
+            {fmtDelta(game.follower_delta_14d)}
+          </span>
+          {game.follower_delta_14d_pct !== null ? (
+            <span className="text-[10px] text-muted tabular-nums">
+              {fmtPct(game.follower_delta_14d_pct)}
+            </span>
+          ) : null}
+        </div>
+      );
+    },
+  }),
+  col.accessor("wishlist_rank", {
+    id: "wishlist_rank",
+    header: () => (
+      <span title="Valve's Top Wishlists position; blends total wishlists and recent velocity — not a count.">
+        Wishlist rank
+      </span>
+    ),
+    cell: (info) => {
+      const game = info.row.original;
+      if (game.wishlist_rank !== null)
+        return <span className="tabular-nums">#{game.wishlist_rank}</span>;
+      // The chart covers only unreleased games, so "Not ranked" is only
+      // meaningful for those; for a released game the concept doesn't apply.
+      return game.is_released ? (
+        <span className="text-muted">{DASH}</span>
+      ) : (
+        <span className="text-muted">Not ranked</span>
+      );
+    },
+  }),
+  col.accessor("rank_delta_7d", {
+    id: "rank_delta_7d",
+    header: () => (
+      <span title="Change in Top Wishlists position over 7 days; positive = moved up. Noisy at the tail of the chart — interpret small moves with care.">
+        Rank Δ7d
+      </span>
+    ),
+    cell: (info) => {
+      const value = info.getValue();
+      if (value === null) return <span className="text-muted">{DASH}</span>;
+      return (
+        <span className={`tabular-nums ${value > 0 ? "text-good-text" : "text-ink2"}`}>
+          {fmtDelta(value)}
+        </span>
+      );
+    },
   }),
   col.accessor((g) => g.wishlist.value, {
     id: "wishlist",
-    header: "Wishlist",
+    header: () => (
+      <span title="Only shown when a developer publicly disclosed the figure. Steam publishes no wishlist counts, and this project never estimates one.">
+        Wishlist
+      </span>
+    ),
     cell: (info) => {
       const wishlist = info.row.original.wishlist;
+      // Confirmed disclosure or nothing. No "estimated" badge on this column,
+      // ever — there is no defensible way to estimate a wishlist count.
+      if (wishlist.status !== "confirmed" || wishlist.value === null)
+        return <span className="text-muted">Unknown</span>;
       return (
         <div className="flex flex-col">
-          <span className="tabular-nums">{fmtCompact(wishlist.value)}</span>
-          <StatusBadge status={wishlist.status} />
+          <span className="tabular-nums">
+            {fmtWishlist(wishlist.value, wishlist.comparator)}
+          </span>
+          <span className="text-[10px] text-muted">
+            {wishlist.source_url ? (
+              <a
+                href={wishlist.source_url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-accent hover:underline"
+              >
+                {fmtDate(wishlist.disclosed_on) || "source"}
+              </a>
+            ) : (
+              fmtDate(wishlist.disclosed_on)
+            )}
+          </span>
         </div>
       );
     },
@@ -227,21 +363,6 @@ const columns = [
         <div className="flex flex-col">
           <span className="tabular-nums">{fmtMoney(revenue.value)}</span>
           <StatusBadge status={revenue.status} />
-        </div>
-      );
-    },
-  }),
-  col.accessor((g) => g.budget.value, {
-    id: "budget",
-    header: "Budget",
-    cell: (info) => {
-      const budget = info.row.original.budget;
-      if (budget.value === null)
-        return <span className="text-muted">{DASH}</span>;
-      return (
-        <div className="flex flex-col">
-          <span className="tabular-nums">{fmtMoney(budget.value)}</span>
-          <StatusBadge status={budget.status} />
         </div>
       );
     },
@@ -372,6 +493,33 @@ function ExpandedRow({ game }: { game: GameListItem }) {
 export function GamesTable() {
   const { searchParams, setParams } = useFilterParams();
   const [expandedAppid, setExpandedAppid] = useState<number | null>(null);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
+    DEFAULT_COLUMN_VISIBILITY,
+  );
+
+  // Restored after mount, never during render: localStorage doesn't exist on the
+  // server, and seeding initial state from it would break hydration.
+  useEffect(() => {
+    const saved = window.localStorage.getItem(VISIBILITY_STORAGE_KEY);
+    if (!saved) return;
+    try {
+      setColumnVisibility(JSON.parse(saved) as VisibilityState);
+    } catch {
+      // Malformed (hand-edited or stale shape) — silently keep the defaults.
+    }
+  }, []);
+
+  const handleVisibilityChange: OnChangeFn<VisibilityState> = (updater) => {
+    const next =
+      typeof updater === "function" ? updater(columnVisibility) : updater;
+    setColumnVisibility(next);
+    window.localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(next));
+  };
+
+  const resetColumns = () => {
+    setColumnVisibility(DEFAULT_COLUMN_VISIBILITY);
+    window.localStorage.removeItem(VISIBILITY_STORAGE_KEY);
+  };
 
   const apiParams = useMemo(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -392,16 +540,26 @@ export function GamesTable() {
     data: data?.items ?? [],
     columns,
     getCoreRowModel: getCoreRowModel(),
+    state: { columnVisibility },
+    onColumnVisibilityChange: handleVisibilityChange,
     meta: { expandedAppid, toggleExpanded } satisfies ExpandMeta,
   });
+
+  // Full-width rows (skeleton, expanded panel, empty state) must track the
+  // VISIBLE column count, not the full column list.
+  const visibleColumnCount = table.getVisibleLeafColumns().length;
 
   const currentSort = searchParams.get("sort") ?? "-release_date";
 
   function onSort(columnId: string) {
     const key = SORTABLE[columnId];
     if (!key) return;
-    const next =
-      currentSort === `-${key}` ? key : currentSort === key ? `-${key}` : `-${key}`;
+    // First click should show the BEST values first. For rank that means
+    // ascending (rank 1 is the top of the chart); for everything else,
+    // descending.
+    const preferred = ASCENDING_IS_BETTER.has(key) ? key : `-${key}`;
+    const opposite = preferred.startsWith("-") ? key : `-${key}`;
+    const next = currentSort === preferred ? opposite : preferred;
     setParams({ sort: next }, false);
   }
 
@@ -409,15 +567,20 @@ export function GamesTable() {
     return (
       <Card className="p-8 text-center text-sm text-muted">
         API is unreachable — is the backend running on{" "}
-        <code>localhost:8000</code>?
+        <code>localhost:9100</code>?
       </Card>
     );
   }
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex items-center">
+        <ColumnPicker table={table} onReset={resetColumns} />
+      </div>
       <Card className="overflow-x-auto">
-        <table className="w-full min-w-[1500px] border-collapse text-sm">
+        {/* No fixed min-width: the column set is user-controlled now, so the
+            table sizes to whatever is visible and scrolls only when it must. */}
+        <table className="w-full border-collapse text-sm">
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="border-b border-grid">
@@ -461,7 +624,7 @@ export function GamesTable() {
             {isLoading
               ? Array.from({ length: 10 }).map((_, i) => (
                   <tr key={i} className="border-b border-grid/60">
-                    <td colSpan={columns.length} className="px-3 py-4">
+                    <td colSpan={visibleColumnCount} className="px-3 py-4">
                       <div className="h-4 animate-pulse rounded bg-grid" />
                     </td>
                   </tr>
@@ -480,7 +643,7 @@ export function GamesTable() {
                     </tr>
                     {expandedAppid === row.original.appid ? (
                       <tr className="border-b border-grid/60 bg-grid/10">
-                        <td colSpan={columns.length}>
+                        <td colSpan={visibleColumnCount}>
                           <ExpandedRow game={row.original} />
                         </td>
                       </tr>
@@ -490,7 +653,7 @@ export function GamesTable() {
             {!isLoading && data && data.items.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={visibleColumnCount}
                   className="px-3 py-10 text-center text-muted"
                 >
                   No games match these filters.

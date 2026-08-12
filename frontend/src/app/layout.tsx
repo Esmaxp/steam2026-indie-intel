@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans antialiased">
         <Providers>
           <header className="border-b border-hairline bg-surface">
-            <div className="mx-auto flex max-w-[1400px] items-center gap-4 px-6 py-4">
+            <div className="flex w-full items-center gap-4 px-6 py-4">
               <Link href="/" className="text-lg font-semibold tracking-tight">
                 Steam 2026 <span className="text-accent">Indie Intelligence</span>
               </Link>
@@ -34,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <SocialLinks />
             </div>
           </header>
-          <main className="mx-auto max-w-[1400px] px-6 py-6">{children}</main>
+          <main className="w-full px-6 py-6">{children}</main>
         </Providers>
       </body>
     </html>

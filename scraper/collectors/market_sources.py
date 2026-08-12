@@ -5,16 +5,17 @@ Sources and what they legitimately provide:
 - Steam appreviews API  — review counts and score (authoritative, Confirmed)
 - SteamCharts           — concurrent player stats (public aggregator)
 - Steam News API        — Next Fest participation mentions (Confirmed via link)
-- Gamalytic public API  — wishlist / sales / revenue ESTIMATES (never facts)
+
+Third-party ESTIMATE vendors were retired; SteamCharts stays because it
+publishes an observed measurement rather than a model output.
 
 Anything a source does not provide stays None — values are never derived
 or invented.
 """
 
 import logging
-import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
 
@@ -25,7 +26,6 @@ logger = logging.getLogger(__name__)
 REVIEWS_URL = "https://store.steampowered.com/appreviews/{appid}"
 STEAMCHARTS_URL = "https://steamcharts.com/app/{appid}"
 NEWS_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
-GAMALYTIC_URL = "https://api.gamalytic.com/game/{appid}"
 
 _NEXT_FEST_RE = re.compile(r"next\s*fest", re.I)
 
@@ -134,58 +134,3 @@ async def fetch_next_fest_mentions(client: SteamClient, appid: int) -> list[Next
     )
     items = (data.get("appnews") or {}).get("newsitems") or []
     return find_next_fest_mentions(items)
-
-
-# --- Gamalytic estimates ---------------------------------------------------
-
-@dataclass(frozen=True)
-class GamalyticEstimates:
-    wishlists: int | None = None
-    copies_sold: int | None = None
-    revenue_usd: float | None = None
-    owners: int | None = None
-    followers: int | None = None
-    source_url: str = ""
-    raw_keys: list[str] = field(default_factory=list)
-
-
-def _first_number(data: dict, keys: tuple[str, ...]) -> float | None:
-    """Defensive extraction: the public API's field names are not contractual."""
-    for key in keys:
-        value = data.get(key)
-        if isinstance(value, (int, float)) and value >= 0:
-            return value
-    return None
-
-
-def extract_gamalytic(data: dict, appid: int) -> GamalyticEstimates:
-    wishlists = _first_number(data, ("wishlists", "wishlistCount", "wishlist"))
-    copies = _first_number(data, ("copiesSold", "sales", "unitsSold"))
-    revenue = _first_number(data, ("revenue", "totalRevenue", "estimatedRevenue"))
-    owners = _first_number(data, ("owners",))
-    followers = _first_number(data, ("followers",))
-    return GamalyticEstimates(
-        wishlists=int(wishlists) if wishlists is not None else None,
-        copies_sold=int(copies) if copies is not None else None,
-        revenue_usd=float(revenue) if revenue is not None else None,
-        owners=int(owners) if owners is not None else None,
-        followers=int(followers) if followers is not None else None,
-        source_url=f"https://gamalytic.com/game/{appid}",
-        raw_keys=sorted(data.keys()),
-    )
-
-
-async def fetch_gamalytic(client: SteamClient, appid: int) -> GamalyticEstimates | None:
-    """Estimates — recorded strictly as status=estimated with source.
-
-    As of August 2026 the Gamalytic API requires an API key (paid plans).
-    Set GAMALYTIC_API_KEY to enable this source; without it, requests 403
-    and wishlist/revenue honestly stay Unknown."""
-    params = None
-    api_key = os.environ.get("GAMALYTIC_API_KEY", "").strip()
-    if api_key:
-        params = {"api_key": api_key}
-    data = await client.get_json(GAMALYTIC_URL.format(appid=appid), params=params)
-    if not isinstance(data, dict) or data.get("error"):
-        return None
-    return extract_gamalytic(data, appid)

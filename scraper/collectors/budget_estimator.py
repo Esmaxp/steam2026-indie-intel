@@ -26,6 +26,7 @@ import sqlalchemy as sa
 
 from app.db.session import async_session_factory
 from app.models import BudgetEstimate, DataStatus, MarketingInfo, RevenueRecord
+from app.services.games_query import status_priority
 from scraper.collectors.budget_cost_tables import (
     COST_TABLE_SOURCE,
     MONTHLY_COST_PER_PERSON_USD,
@@ -105,11 +106,15 @@ async def recompute_budgets(only_appid: int | None = None) -> dict:
     computed = 0
     async with async_session_factory() as db:
         # Latest revenue summary per game (confirmed preferred, then newest).
+        # status_priority() rather than the raw enum — see its docstring; the
+        # enum's physical order puts `conflicting` behind `unknown`.
         latest_revenue = (
             sa.select(RevenueRecord)
             .distinct(RevenueRecord.appid)
             .order_by(
-                RevenueRecord.appid, RevenueRecord.status, RevenueRecord.recorded_at.desc()
+                RevenueRecord.appid,
+                status_priority(RevenueRecord.status),
+                RevenueRecord.recorded_at.desc(),
             )
             .subquery()
         )

@@ -7,7 +7,19 @@ Values are never invented; missing data stays NULL with status "unknown".
 
 import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +30,21 @@ from app.models.enums import DataStatus
 
 class WishlistRecord(Base):
     __tablename__ = "wishlist_records"
+    __table_args__ = (
+        # Bare suffix — NAMING_CONVENTION adds the ck_<table>_ prefix.
+        CheckConstraint("comparator in ('=', '>=')", name="comparator"),
+        # Makes the disclosure harvester re-runnable: the same figure from the
+        # same announcement URL cannot be ingested twice. Partial, because
+        # collector-written rows reuse one source_url per source.
+        Index(
+            "uq_wishlist_records_disclosure",
+            "appid",
+            "source_url",
+            "wishlist_count",
+            unique=True,
+            postgresql_where=text("source_url IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     appid: Mapped[int] = mapped_column(
@@ -27,8 +54,15 @@ class WishlistRecord(Base):
         pg_enum(DataStatus, "data_status"), default=DataStatus.UNKNOWN, index=True
     )
     wishlist_count: Mapped[int | None] = mapped_column(BigInteger)
+    # '=' for an exact figure, '>=' for a lower bound. Developer milestone
+    # posts are overwhelmingly round-number lower bounds ("over 100,000
+    # wishlists"), so recording those as '=' would overstate the disclosure.
+    comparator: Mapped[str] = mapped_column(Text, server_default=text("'='"), nullable=False)
     source_name: Mapped[str | None] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(Text)
+    # The announcement's own UTC date. Distinct from recorded_at, which is
+    # ingestion time — for a disclosure only one of them is the observation.
+    disclosed_on: Mapped[datetime.date | None] = mapped_column(Date)
     recorded_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -50,7 +84,10 @@ class RevenueEstimate(Base):
     appid: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("games.appid", ondelete="CASCADE"), index=True
     )
-    source_name: Mapped[str] = mapped_column(Text)  # gamalytic|steamspy|vginsights|disclosed
+    # 'disclosed' only. The vendor values (gamalytic|steamspy|vginsights) are
+    # historical: those collectors were retired when the project moved to
+    # first-party signals, and their rows are removed in migration 0012.
+    source_name: Mapped[str] = mapped_column(Text)
     status: Mapped[DataStatus] = mapped_column(
         pg_enum(DataStatus, "data_status"), default=DataStatus.ESTIMATED
     )

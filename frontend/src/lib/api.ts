@@ -3,15 +3,17 @@ import type {
   ChannelSubmissionOut,
   DashboardSummary,
   FilterOptions,
+  FollowerPoint,
   GameDetail,
   GameListItem,
   GameVideosPayload,
   Page,
+  RankPoint,
   StatsPoint,
 } from "@/lib/types";
 
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:9100";
 
 async function getJson<T>(path: string, params?: URLSearchParams): Promise<T> {
   const qs = params && params.size > 0 ? `?${params.toString()}` : "";
@@ -42,6 +44,14 @@ export function fetchSimilarGames(appid: number, limit = 10) {
 
 export function fetchGameStats(appid: number) {
   return getJson<StatsPoint[]>(`/api/v1/games/${appid}/stats`);
+}
+
+export function fetchGameFollowers(appid: number) {
+  return getJson<FollowerPoint[]>(`/api/v1/games/${appid}/followers`);
+}
+
+export function fetchGameRankHistory(appid: number) {
+  return getJson<RankPoint[]>(`/api/v1/games/${appid}/rank-history`);
 }
 
 export function fetchSummary() {

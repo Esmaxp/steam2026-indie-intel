@@ -36,11 +36,12 @@ Social video gallery + header account links.
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000 (API expected at localhost:8000)
+npm run dev        # http://localhost:4000 (API expected at localhost:9100)
 ```
 
 Set `NEXT_PUBLIC_API_URL` to point at a different backend.
 
 ## Docker
 
-Built and served by `docker compose up` (standalone output, port 3000).
+Built and served by `docker compose up` (standalone output). The container
+listens on 3000 internally and is published on host port 4000.

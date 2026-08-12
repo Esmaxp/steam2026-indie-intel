@@ -8,7 +8,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
 
-    database_url: str = "postgresql+asyncpg://steam:steam@localhost:5432/steam2026"
+    # Local (non-Docker) fallback: 9432 is the host port the db container publishes.
+    database_url: str = "postgresql+asyncpg://steam:steam@localhost:9432/steam2026"
 
     exports_dir: str = "/data/exports"
     logs_dir: str = "/data/logs"

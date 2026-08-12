@@ -90,10 +90,29 @@ class GameListItem(BaseModel):
     peak_ccu: int | None = None
     avg_ccu: float | None = None
 
+    # --- first-party measured demand signals ---------------------------------
+    # Followers and rank are MEASURED — Valve publishes both — so they are
+    # plain fields, deliberately not Provenanced. That wrapper exists for
+    # values Steam does not expose and which therefore carry a trust status.
+    followers: int | None = None
+    followers_captured_at: datetime.datetime | None = None
+    follower_delta_14d: int | None = None
+    follower_delta_14d_pct: float | None = None
+    # Valve's Top-Wishlists position. Blends total wishlists with recent
+    # velocity — an ORDER, never a count, and no count may be derived from it.
+    # None means "not on the chart", which is the common case: the chart holds
+    # ~5.2k games across all of Steam.
+    wishlist_rank: int | None = None
+    wishlist_ranked: bool = False
+    # Positive = moved UP the chart. Ships hidden until day-over-day rank
+    # volatility is measured (scripts/rank_delta_report.py).
+    rank_delta_7d: int | None = None
+
+    # Only ever `confirmed` (a developer disclosed it) or `unknown`. No
+    # estimate is ever computed for this field — see the wishlist plan.
     wishlist: Provenanced = Provenanced()
     revenue: Provenanced = Provenanced()
     estimated_sales: int | None = None
-    budget: Provenanced = Provenanced()
 
 
 class BudgetEstimateOut(BaseModel):
@@ -120,10 +139,35 @@ class MarketingOut(BaseModel):
 class WishlistRecordOut(BaseModel):
     status: str
     wishlist_count: int | None = None
+    # '>=' for a disclosed lower bound; see Provenanced.comparator.
+    comparator: str = "="
+    disclosed_on: datetime.date | None = None
     source_name: str | None = None
     source_url: str | None = None
     recorded_at: datetime.datetime
     notes: str | None = None
+
+
+class FollowerPoint(BaseModel):
+    """One community-hub follower measurement. Exact, first-party."""
+
+    captured_at: datetime.datetime
+    followers: int
+    source_name: str | None = None
+    source_url: str | None = None
+
+
+class RankPoint(BaseModel):
+    """One Top-Wishlists position from a COMPLETE sweep.
+
+    Partial sweeps are excluded: they hold only the head of the chart, so
+    including them would read as a game dropping off it.
+    """
+
+    swept_at: datetime.datetime
+    rank: int
+    total_ranked: int | None = None
+    cc: str = "us"
 
 
 class RevenueRecordOut(BaseModel):
@@ -208,8 +252,13 @@ class DashboardSummary(BaseModel):
     games_with_demo: int
     next_fest_games: int
     avg_reviews: AverageStat
-    avg_wishlist: AverageStat
-    avg_revenue: AverageStat
+    # Coverage counters, not averages. There is no wishlist average to report:
+    # a wishlist figure exists only where a developer disclosed one, and those
+    # are mostly lower bounds ("over 100,000"), so averaging them would invent
+    # a precision the data does not have.
+    games_with_followers: int
+    ranked_games: int
+    confirmed_wishlist_games: int
 
 
 class FilterOptions(BaseModel):

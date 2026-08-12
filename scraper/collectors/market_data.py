@@ -6,15 +6,20 @@ Per game:
 1. Steam appreviews API → review counts/score (authoritative)
 2. SteamCharts → all-time peak CCU + last-30-days average CCU (public)
 3. Steam News API → Steam Next Fest participation mentions
-4. Gamalytic public API → wishlist / sales / revenue ESTIMATES
 
 Provenance rules (never fabricate):
 - Review stats come from Steam itself → stored as facts in steam_stats.
 - CCU comes from SteamCharts → stored with source; missing chart = NULL.
-- Wishlist/revenue are NOT exposed by Steam → only recorded when a public
-  estimator provides a number, always with status=ESTIMATED and source URL.
-  No estimator data → status stays UNKNOWN (represented by the absence of
-  confirmed/estimated records).
+  SteamCharts is third-party, but it publishes an observed MEASUREMENT
+  rather than a model output, so it is labelled rather than retired.
+- Wishlist/revenue are NOT exposed by Steam. Third-party ESTIMATE vendors
+  (Gamalytic, SteamSpy, VG Insights) were retired: this project reports
+  measured signals and developer disclosures only. Revenue therefore has no
+  source at all and stays UNKNOWN; wishlist figures arrive solely via
+  disclosed_numbers_source.py as CONFIRMED rows.
+- Demand for unreleased games is measured elsewhere and first-party:
+  follower counts (workers/refresh_followers.py) and Valve's Top-Wishlists
+  ordinal (scraper/collectors/wishlist_rank.py).
 - Next Fest participation recorded only with a concrete news link as source.
 """
 
@@ -29,26 +34,18 @@ from tqdm import tqdm
 
 from app.db.session import async_session_factory
 from app.models import (
-    DataStatus,
     Festival,
     Game,
-    RevenueEstimate,
-    RevenueRecord,
     SteamStats,
     SyncStage,
     SyncStatus,
-    WishlistRecord,
     game_festivals,
 )
 from scraper.collectors.market_sources import (
     fetch_ccu_stats,
-    fetch_gamalytic,
     fetch_next_fest_mentions,
     fetch_review_summary,
 )
-from scraper.collectors.revenue_merge import merge_estimates
-from scraper.collectors.steamspy_source import fetch_steamspy
-from scraper.collectors.vginsights_source import fetch_vginsights, robots_allows_games
 from scraper.common.http import SteamClient, make_session
 from scraper.common.sync import mark, pending_appids
 from tenacity import RetryError
@@ -57,9 +54,6 @@ logger = logging.getLogger(__name__)
 
 STEAM_MIN_INTERVAL = 1.5
 CHARTS_MIN_INTERVAL = 2.0
-GAMALYTIC_MIN_INTERVAL = 2.0
-STEAMSPY_MIN_INTERVAL = 1.1   # SteamSpy recommends ~1 req/sec
-VGINSIGHTS_MIN_INTERVAL = 2.0
 
 NEXT_FEST_NAME = "Steam Next Fest"
 
@@ -70,30 +64,10 @@ BROWSER_UA = (
 )
 
 
-class SourceBreaker:
-    """Stops hammering a source that keeps refusing us (e.g. WAF 403s).
-
-    After `threshold` consecutive failures the source is skipped for the rest
-    of the run — its values simply stay Unknown instead of costing time."""
-
-    def __init__(self, name: str, threshold: int = 3):
-        self.name = name
-        self.threshold = threshold
-        self.failures = 0
-        self.open = False
-
-    def record_success(self) -> None:
-        self.failures = 0
-
-    def record_failure(self) -> None:
-        self.failures += 1
-        if self.failures >= self.threshold and not self.open:
-            self.open = True
-            logger.warning(
-                "Source %s disabled for this run after %d consecutive failures "
-                "(its values stay Unknown)",
-                self.name, self.failures,
-            )
+# SourceBreaker (a consecutive-failure circuit breaker) was removed with the
+# vendor sources that were its only consumers. SteamCharts, the one remaining
+# third party, relies on max_attempts=2 instead. Reinstate it from git history
+# if a future source needs run-level disabling.
 
 
 async def _ensure_next_fest(db: AsyncSession) -> int:
@@ -106,16 +80,16 @@ async def _ensure_next_fest(db: AsyncSession) -> int:
 
 @dataclass
 class MarketSources:
-    """Clients + circuit breakers for every market-data source."""
+    """HTTP clients for every market-data source.
+
+    Third-party ESTIMATE vendors (Gamalytic, SteamSpy, VG Insights) were
+    retired: this project reports measured first-party signals and
+    developer-disclosed figures only. SteamCharts stays — it publishes an
+    observed measurement (concurrent players) rather than a model output.
+    """
 
     steam: SteamClient
     charts: SteamClient
-    gamalytic: SteamClient
-    steamspy: SteamClient
-    vginsights: SteamClient
-    gamalytic_breaker: SourceBreaker
-    steamspy_breaker: SourceBreaker
-    vginsights_breaker: SourceBreaker
 
 
 async def collect_one(
@@ -145,51 +119,22 @@ async def collect_one(
         except (Exception, RetryError) as exc:
             logger.debug("SteamCharts unavailable for %s: %s", appid, exc)
 
-    # 3. Gamalytic estimates (skipped entirely once the breaker opens).
-    estimates = None
-    if not sources.gamalytic_breaker.open:
-        try:
-            estimates = await fetch_gamalytic(sources.gamalytic, appid)
-            sources.gamalytic_breaker.record_success()
-        except Exception as exc:
-            sources.gamalytic_breaker.record_failure()
-            logger.debug("Gamalytic unavailable for %s: %s", appid, exc)
-
-    # 4. Next Fest mentions from official Steam news.
+    # 3. Next Fest mentions from official Steam news.
     mentions = []
     try:
         mentions = await fetch_next_fest_mentions(sources.steam, appid)
     except Exception as exc:
         logger.warning("News fetch failed for %s: %s", appid, exc)
 
-    # 5. SteamSpy owners estimate (skipped once its breaker opens).
-    steamspy = None
-    if not sources.steamspy_breaker.open:
-        try:
-            steamspy = await fetch_steamspy(sources.steamspy, appid)
-            sources.steamspy_breaker.record_success()
-        except Exception as exc:
-            sources.steamspy_breaker.record_failure()
-            logger.debug("SteamSpy unavailable for %s: %s", appid, exc)
-
-    # 6. VG Insights revenue estimate (skipped once its breaker opens).
-    vginsights = None
-    if not sources.vginsights_breaker.open:
-        try:
-            vginsights = await fetch_vginsights(sources.vginsights, appid)
-            sources.vginsights_breaker.record_success()
-        except Exception as exc:
-            sources.vginsights_breaker.record_failure()
-            logger.debug("VG Insights unavailable for %s: %s", appid, exc)
-
     # --- persist -----------------------------------------------------------
-    sources = []
+    # NB: named source_labels, not `sources` — that name is the MarketSources
+    # parameter above. Rebinding it here used to shadow the dataclass, so any
+    # fetch added below this line raised AttributeError on a list.
+    source_labels = []
     if reviews is not None:
-        sources.append("store.steampowered.com/appreviews")
+        source_labels.append("store.steampowered.com/appreviews")
     if ccu is not None:
-        sources.append("steamcharts.com")
-    if estimates is not None and estimates.followers is not None:
-        sources.append("gamalytic.com (followers)")
+        source_labels.append("steamcharts.com")
 
     if reviews is not None or ccu is not None:
         db.add(
@@ -203,88 +148,18 @@ async def collect_one(
                 review_score_desc=reviews.review_score_desc if reviews else None,
                 peak_ccu=ccu.peak_all_time if ccu else None,
                 avg_ccu=ccu.avg_recent if ccu else None,
-                followers=estimates.followers if estimates else None,
-                source_name=" + ".join(sources),
+                # followers is written by workers/refresh_followers.py into
+                # follower_snapshots, measured from Steam's own hub pages.
+                # This column is vestigial and drops in a later migration.
+                source_name=" + ".join(source_labels),
                 source_url=f"https://steamcharts.com/app/{appid}" if ccu else None,
             )
         )
 
-    if estimates is not None and estimates.wishlists is not None:
-        db.add(
-            WishlistRecord(
-                appid=appid,
-                status=DataStatus.ESTIMATED,
-                wishlist_count=estimates.wishlists,
-                source_name="Gamalytic (public estimate)",
-                source_url=estimates.source_url,
-            )
-        )
-
-    # --- raw multi-source estimate rows (revenue_estimates table) ----------
-    run_estimates: list[RevenueEstimate] = []
-    if estimates is not None and (
-        estimates.revenue_usd is not None
-        or estimates.copies_sold is not None
-        or estimates.owners is not None
-    ):
-        run_estimates.append(
-            RevenueEstimate(
-                appid=appid,
-                source_name="gamalytic",
-                status=DataStatus.ESTIMATED,
-                revenue_usd=estimates.revenue_usd,
-                estimated_sales=estimates.copies_sold,
-                owners_min=estimates.owners,
-                owners_max=estimates.owners,
-                wishlist_count=estimates.wishlists,
-                source_url=estimates.source_url,
-            )
-        )
-    if steamspy is not None:
-        run_estimates.append(
-            RevenueEstimate(
-                appid=appid,
-                source_name="steamspy",
-                status=DataStatus.ESTIMATED,
-                owners_min=steamspy.owners_min,
-                owners_max=steamspy.owners_max,
-                source_url=steamspy.source_url,
-            )
-        )
-    if vginsights is not None:
-        run_estimates.append(
-            RevenueEstimate(
-                appid=appid,
-                source_name="vginsights",
-                status=DataStatus.ESTIMATED,
-                revenue_usd=vginsights.revenue_usd,
-                estimated_sales=vginsights.copies_sold,
-                owners_min=vginsights.owners_min,
-                owners_max=vginsights.owners_max,
-                source_url=vginsights.source_url,
-            )
-        )
-    for row in run_estimates:
-        db.add(row)
-
-    # Summary view: Confirmed wins; otherwise median of the estimates, with
-    # status=conflicting when sources disagree by more than 50%.
-    merged = merge_estimates(run_estimates)
-    if merged is not None:
-        db.add(
-            RevenueRecord(
-                appid=appid,
-                status=merged.status,
-                gross_revenue_usd=merged.gross_revenue_usd,
-                estimated_sales=merged.estimated_sales,
-                estimated_owners_min=merged.owners_min,
-                estimated_owners_max=merged.owners_max,
-                estimate_spread=merged.estimate_spread,
-                source_name=merged.source_name,
-                source_url=merged.source_url,
-                notes=merged.notes,
-            )
-        )
+    # No revenue/wishlist estimate rows are written here any more. Wishlist
+    # figures come only from developer disclosures (see
+    # disclosed_numbers_source.py), which write CONFIRMED rows and run their
+    # own merge; revenue has no first-party source at all and stays unknown.
 
     if mentions:
         festival_id = await _ensure_next_fest(db)
@@ -316,24 +191,7 @@ async def run_market_collector(limit: int = 0, only_appid: int | None = None) ->
             charts=SteamClient(
                 browser_http, min_interval=CHARTS_MIN_INTERVAL, max_attempts=2
             ),
-            gamalytic=SteamClient(browser_http, min_interval=GAMALYTIC_MIN_INTERVAL),
-            steamspy=SteamClient(browser_http, min_interval=STEAMSPY_MIN_INTERVAL),
-            vginsights=SteamClient(
-                browser_http, min_interval=VGINSIGHTS_MIN_INTERVAL, max_attempts=2
-            ),
-            gamalytic_breaker=SourceBreaker("gamalytic.com"),
-            steamspy_breaker=SourceBreaker("steamspy.com"),
-            vginsights_breaker=SourceBreaker("vginsights.com"),
         )
-
-        # robots.txt gate — checked once per run, before any page scraping.
-        try:
-            if not await robots_allows_games(sources.vginsights):
-                sources.vginsights_breaker.open = True
-                logger.warning("VG Insights robots.txt disallows game pages — source off")
-        except Exception as exc:
-            sources.vginsights_breaker.open = True
-            logger.warning("VG Insights robots check failed (%s) — source off", exc)
 
         async with async_session_factory() as db:
             if only_appid is not None:

@@ -41,7 +41,7 @@ docker compose run --rm discovery python -m scraper.discovery.run --mode applist
 
 # locally (from repo root)
 pip install -e ./backend
-set DATABASE_URL=postgresql+asyncpg://steam:steam@localhost:5432/steam2026
+set DATABASE_URL=postgresql+asyncpg://steam:steam@localhost:9432/steam2026
 python -m scraper.discovery.run --mode search
 ```
 

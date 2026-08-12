@@ -49,7 +49,7 @@ Core principles:
 ┌───────────────▼───────────────┐
 │   frontend/  Next.js + TS     │  Dashboard · Table · Filters
 │   Tailwind · shadcn/ui        │  Game detail pages · Charts
-│   TanStack Table · Recharts   │  http://localhost:3000
+│   TanStack Table · Recharts   │  http://localhost:4000
 └───────────────────────────────┘
 ```
 
@@ -279,12 +279,12 @@ Each phase is committed before the next one starts.
 
 ```bash
 docker compose up --build
-# → PostgreSQL on :5432, migrations applied automatically,
-#   FastAPI on http://localhost:8000  (GET /health, GET /docs)
+# → PostgreSQL on :9432, migrations applied automatically,
+#   FastAPI on http://localhost:9100  (GET /health, GET /docs)
 ```
 
 Frontend joins Docker Compose in Phase 6 and will serve
-`http://localhost:3000`.
+`http://localhost:4000`.
 
 ---
 
