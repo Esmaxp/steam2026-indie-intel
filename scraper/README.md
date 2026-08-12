@@ -93,14 +93,12 @@ Processes the `market_data` queue that the store collector filled. Per game:
   aggregator; games without a chart simply stay NULL)
 - **Steam News API** — Steam Next Fest participation, recorded only when an
   official news item mentions it (the news link is stored as the source)
-- **Gamalytic public API** — wishlist / copies sold / gross revenue / owners
-  **estimates**, stored append-only with `status = estimated` and source URL
 
-Provenance guarantees: Steam does not expose wishlist/revenue — those are
-only written when a public estimator provides a number, always flagged
-`estimated` with a source; nothing found = no record = Unknown in the UI.
-Review stats snapshots accumulate over time in `steam_stats` (append-only),
-so re-running the collector builds a history.
+Provenance guarantees: Steam does not expose wishlist or revenue figures.
+Third-party estimate vendors were retired, so revenue is Unknown for every
+game and wishlist counts come only from developer disclosures. Review stats
+snapshots accumulate in `steam_stats` (append-only), so re-running builds a
+history.
 
 ```bash
 docker compose run --rm market
@@ -108,3 +106,31 @@ docker compose run --rm market python -m scraper.collectors.run_market --appid 1
 ```
 
 Logs land in `logs/market.log`.
+
+## Demand signals (first-party, keyless)
+
+Three collectors record what Valve itself publishes. None needs an API key.
+
+- **`followers`** (`workers/refresh_followers.py`) — community-hub member
+  counts, an exact measurement. Bounded batches at 4s spacing; a full
+  upcoming-catalogue sweep is ~6h, so run it daily with `--limit`. A hub-less
+  game returns HTTP 200 with an error page, so the parser requires the count
+  token and writes nothing rather than `0`.
+- **`rank_sweep`** (`scraper/collectors/wishlist_rank.py`) — Valve's
+  Top-Wishlists ordinal, ~53 requests for the whole chart. Records a rank,
+  never a count: the ordering blends total wishlists with recent velocity.
+  A sweep that fails validation is stored as `partial` and ignored by the
+  delta queries, so a rate-limited run cannot read as "everything left the
+  chart".
+- **`disclosures`** (`workers/harvest_disclosures.py`) — wishlist figures
+  developers announce in their own Steam news posts, written at `confirmed`
+  with the announcement URL and date. **Defaults to a dry run**: without
+  `--write` it emits a CSV to `logs/` with the matched sentence per row for
+  review.
+
+```bash
+docker compose run --rm followers --limit 500
+docker compose run --rm rank_sweep
+docker compose run --rm disclosures --limit 400        # dry run
+docker compose run --rm disclosures --limit 400 --write
+```

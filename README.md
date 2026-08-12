@@ -47,12 +47,14 @@ in order; each states its expected outcome.
    docker compose run --rm backend alembic upgrade head   # in case migrations landed after the export
    ```
 
-   Expected outcome: the dashboard shows ~14,000+ games immediately. The
-   snapshot date is in `database/seed/full_export.meta.txt` — prices,
-   reviews and wishlist/revenue estimates are only as fresh as that date.
-   Run `docker compose run --rm refresher` afterward for current stats, or
-   `pipeline` to re-discover games released since the snapshot. Safe to
-   re-run (the restore drops and recreates the dumped objects).
+   Expected outcome: the dashboard shows ~14,000+ games immediately, with
+   follower counts and Top-Wishlists ranks already populated. The snapshot
+   date is in `database/seed/full_export.meta.txt` — prices, reviews,
+   followers and ranks are only as fresh as that date. Run
+   `docker compose run --rm refresher` afterward for current stats,
+   `followers` / `rank_sweep` for current demand signals, or `pipeline` to
+   re-discover games released since the snapshot. Safe to re-run (the
+   restore drops and recreates the dumped objects).
 
    **(b) Quick sample — run the real pipeline on ~50 games** (~10 minutes;
    use this if you specifically want to test the collection pipeline
@@ -103,12 +105,20 @@ in order; each states its expected outcome.
 | websites | Backfill `games.website` from Steam | – | no (profile: scrape) | `docker compose run --rm websites [--limit 300]` |
 | scanner | Detect social channels on game websites | – | no (profile: scrape) | `docker compose run --rm scanner [--limit 200]` |
 | video_prefetch | Warm per-game video cache | – | no (profile: scrape) | `docker compose run --rm video_prefetch [--limit 200]` |
+| followers | Community-hub follower counts (daily) | – | no (profile: scrape) | `docker compose run --rm followers [--limit 500]` |
+| rank_sweep | Valve Top-Wishlists ordinal sweep (daily) | – | no (profile: scrape) | `docker compose run --rm rank_sweep` |
+| disclosures | Developer-disclosed wishlist counts from Steam news | – | no (profile: scrape) | `docker compose run --rm disclosures [--write]` |
 | tests | Unit tests (pure functions, no DB) | – | no (profile: scrape) | `docker compose run --rm tests` |
 
 Community-video flow (all optional, needs `YOUTUBE_API_KEY` / `TWITCH_*` keys
 for actual videos): `websites` → `scanner` → review at
 http://localhost:4000/admin/submissions (token = `ADMIN_TOKEN` from `.env`) →
 `video_prefetch`.
+
+Demand-signal flow (no keys at all — every source is Valve's own): run
+`followers` and `rank_sweep` daily to build the time series that make
+Followers Δ14d and Rank Δ7d meaningful, and `disclosures` occasionally to
+pick up new developer announcements.
 
 ## Data honesty
 
@@ -117,14 +127,32 @@ value is stored with a provenance status — **Confirmed / Estimated /
 Unknown / Conflicting** — plus a source link and fetch date. Data is never
 fabricated.
 
-Estimate sources: SteamSpy (owner ranges, free API), Gamalytic (requires
-`GAMALYTIC_API_KEY`), VG Insights public pages (currently behind an
-authenticated SPA → honestly Unknown), and human-verified disclosures via
-`python -m scraper.collectors.disclosed_numbers_source`. Multiple estimates
-are cross-validated by median; sources disagreeing by more than 50% are
-marked **Conflicting** with every source shown. Budgets are either Confirmed
-disclosures or explicitly labeled heuristics (team-cost and revenue-ratio
-methods, formulas and inputs stored for audit — see ARCHITECTURE.md §9).
+**The wishlist column shows a developer-confirmed disclosure, or it shows
+Unknown. There is no derived wishlist number or range for anyone else** — not
+from followers, not from rank, not bought from a vendor. No third-party
+wishlist estimate has ever been validated in public against a real Steamworks
+figure, so no accuracy could be stated for one.
+
+What is shown instead is measured and first-party:
+
+| Column | What it is |
+|---|---|
+| **Followers** | Steam community-hub members — a count Valve publishes. Exact. |
+| **Followers Δ14d** | Change across our own snapshots. Blank, never `0`, until two exist. |
+| **Wishlist rank** | Position on Valve's Top-Wishlists chart. An *order*, not a count — it blends total wishlists with recent velocity. "Not ranked" is the common case: the chart holds ~5.2k games across all of Steam. |
+| **Wishlist** | A figure the developer stated publicly, with the announcement date and a link. `≥` when they gave a lower bound ("over 100,000"), which most do. |
+
+Disclosures are harvested from official Steam news
+(`docker compose run --rm disclosures`), and entered by hand via
+`python -m scraper.collectors.disclosed_numbers_source`. Both write only at
+**Confirmed**, so the harvester defaults to a dry-run CSV for review and needs
+`--write` to insert.
+
+Revenue has no first-party source and reports **Unknown** for every game. The
+third-party estimate vendors were retired: across 8,380 collected rows, none
+carried a revenue or sales figure. **SteamCharts** is kept for concurrent
+players and labelled third-party in the UI — it publishes an observed
+measurement rather than a model output.
 
 ## Troubleshooting
 
@@ -142,10 +170,16 @@ methods, formulas and inputs stored for audit — see ARCHITECTURE.md §9).
   schema (`docker compose down -v` wipes it, then `up --build`).
 - **Dashboard is empty**: that's a fresh database, not a bug. Run
   `docker compose run --rm seed` (step 3) and refresh after ~10 minutes.
-- **"not configured" / missing videos or estimates**: optional API keys are
-  empty. This is the documented graceful state — add `GAMALYTIC_API_KEY`,
-  `YOUTUBE_API_KEY` or `TWITCH_*` to `.env` and
-  `docker compose up -d backend frontend` to enable those features.
+- **"not configured" / missing videos**: the YouTube/Twitch keys are empty.
+  This is the documented graceful state — add `YOUTUBE_API_KEY` or
+  `TWITCH_*` to `.env` and `docker compose up -d backend frontend`.
+- **Wishlist column reads "Unknown" / rank reads "Not ranked"**: both are
+  correct, not a misconfiguration. There is no API key that fills them. Run
+  `docker compose run --rm disclosures` to harvest developer announcements,
+  and `docker compose run --rm rank_sweep` to populate ranks; most games will
+  legitimately stay Unknown and unranked.
+- **Followers Δ14d is blank**: it needs two snapshots at least 14 days apart.
+  Run `docker compose run --rm followers` daily; there is no way to backfill.
 
 ## Local development (without Docker)
 
@@ -207,3 +241,8 @@ repo root.
 9. ✅ Community videos — lazy per-game YouTube/Twitch galleries with view
    counts, developer channel submissions + admin review (`/admin/submissions`),
    website/channel discovery workers (`websites`, `scanner`, `video_prefetch`)
+10. ✅ First-party demand signals — community-hub followers + 14-day delta,
+    Valve Top-Wishlists rank, and developer-disclosed wishlist counts
+    harvested from Steam news (`followers`, `rank_sweep`, `disclosures`).
+    Third-party estimate vendors retired: the wishlist column shows a
+    confirmed disclosure or Unknown, never a derived figure.
