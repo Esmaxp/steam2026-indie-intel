@@ -56,6 +56,9 @@ async def list_games(
     has_website: bool | None = Query(
         None, description="True = only games with an official website on record"
     ),
+    has_videos: bool | None = Query(
+        None, description="True = only games with cached community videos"
+    ),
     next_fest: bool | None = None,
     release_status: str = Query(
         "all",
@@ -79,7 +82,7 @@ async def list_games(
     sort: str = Query(
         "-release_date",
         description="column name, '-' prefix = descending; one of: appid, name, "
-        "release_date, price, reviews, positive_pct, peak_ccu, wishlist, revenue",
+        "release_date, price, reviews, positive_pct, peak_ccu, wishlist, revenue, videos",
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
@@ -87,7 +90,8 @@ async def list_games(
     filters = GameFilters(
         q=q, developer=developer, publisher=publisher, genre=genre, tag=tag,
         engine=engine, dimension=dimension, camera=camera, graphics_style=graphics_style,
-        demo_available=demo_available, has_website=has_website, next_fest=next_fest,
+        demo_available=demo_available, has_website=has_website,
+        has_videos=has_videos, next_fest=next_fest,
         release_status=release_status,
         early_access=early_access, free=free, release_month=release_month,
         min_reviews=min_reviews, min_positive_pct=min_positive_pct,

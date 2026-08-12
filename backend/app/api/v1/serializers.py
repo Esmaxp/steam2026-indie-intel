@@ -86,6 +86,7 @@ def row_to_list_item(row) -> GameListItem:
         budget=_provenanced(
             row.budget_value, row.budget_status, row.budget_source, row.budget_source_url,
         ),
+        video_count=row.video_count,
     )
 
 

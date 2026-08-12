@@ -60,6 +60,8 @@ export interface GameListItem {
   revenue: Provenanced;
   estimated_sales: number | null;
   budget: Provenanced;
+  /** Cached community-video clip count (0 = none fetched/found). */
+  video_count: number;
 }
 
 export interface StatsPoint {
@@ -137,7 +139,7 @@ export interface GameDetail extends GameListItem {
   /** How the game entered the catalog — indie_tag, or a tag-less signal. */
   discovery_method: "indie_tag" | "self_published_no_tag" | "boutique_label_no_tag";
   /** Where the 2D/3D value came from. */
-  dimension_source: "tag" | "rule_based" | "vision_ai" | "unknown";
+  dimension_source: "tag" | "rule_based" | "vision_ai" | "similarity_ai" | "unknown";
   supported_languages: string[];
   controller_support: string;
   steam_deck_support: string;

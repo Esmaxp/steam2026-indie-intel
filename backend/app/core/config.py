@@ -27,10 +27,12 @@ class Settings(BaseSettings):
     submission_cooldown_minutes: int = 10
     admin_token: str = ""
 
-    # Optional vision-based 2D/3D classification (workers/classify_dimension_vision).
-    # Empty key = the worker refuses to run; nothing else uses this.
+    # Optional AI-based 2D/3D classification (workers/classify_dimension_vision
+    # reads a screenshot; workers/classify_dimension_similarity reasons from
+    # metadata). Empty key = both workers refuse to run; nothing else uses this.
     anthropic_api_key: str = ""
     anthropic_vision_model: str = "claude-opus-5"
+    anthropic_text_model: str = "claude-opus-5"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

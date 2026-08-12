@@ -37,9 +37,11 @@ def main() -> None:
     parser.add_argument(
         "--include-untagged",
         action="store_true",
-        help="applist mode only: also admit games WITHOUT the Steam Indie "
-        "genre/tag when they are self-published or on a known boutique indie "
-        "label. Off by default — scope-widening is opt-in.",
+        help="also admit games WITHOUT the Steam Indie genre/tag when they are "
+        "self-published or on a known boutique indie label. With --mode search "
+        "this scans ALL 2026 games via the store search (fast, recommended); "
+        "with --mode applist it widens the exhaustive GetAppList scan. "
+        "Off by default — scope-widening is opt-in.",
     )
     args = parser.parse_args()
 
@@ -49,11 +51,14 @@ def main() -> None:
         run_applist_discovery,
         run_search_discovery,
         run_targeted_discovery,
+        run_untagged_search_discovery,
     )
 
     if args.appid:
         appids = [int(a) for a in args.appid.split(",") if a.strip()]
         summary = asyncio.run(run_targeted_discovery(appids))
+    elif args.mode == "search" and args.include_untagged:
+        summary = asyncio.run(run_untagged_search_discovery(max_pages=args.max_pages))
     elif args.mode == "search":
         summary = asyncio.run(run_search_discovery(max_pages=args.max_pages))
     else:

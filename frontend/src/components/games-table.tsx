@@ -53,6 +53,7 @@ const SORTABLE: Record<string, string> = {
   peak_ccu: "peak_ccu",
   wishlist: "wishlist",
   revenue: "revenue",
+  video_count: "videos",
 };
 
 const columns = [
@@ -174,6 +175,16 @@ const columns = [
         {info.getValue() || DASH}
       </span>
     ),
+  }),
+  col.accessor("video_count", {
+    id: "video_count",
+    header: "Videos",
+    cell: (info) =>
+      info.getValue() > 0 ? (
+        <span className="tabular-nums">{info.getValue()}</span>
+      ) : (
+        <span className="text-muted">{DASH}</span>
+      ),
   }),
   col.accessor("dimension", {
     id: "dimension",

@@ -95,19 +95,55 @@ in order; each states its expected outcome.
 | frontend | Next.js dashboard | 3000 | yes | `docker compose up` |
 | db_restore | Restore the committed full-catalog snapshot | – | no (profile: scrape) | `docker compose run --rm db_restore` |
 | seed | Quick-start data seed (~50 games) | – | no (profile: scrape) | `docker compose run --rm seed` |
-| discovery | Find 2026 indie games on Steam | – | no (profile: scrape) | `docker compose run --rm discovery [--mode search\|applist]` |
-| collector | Full store data per queued game | – | no (profile: scrape) | `docker compose run --rm collector [--limit 500]` |
+| discovery | Find 2026 indie games on Steam | – | no (profile: scrape) | `docker compose run --rm discovery` |
+| collector | Full store data per queued game | – | no (profile: scrape) | `docker compose run --rm collector` |
 | market | Market/estimate collector (Phase 4) | – | no (profile: scrape) | `docker compose run --rm market` |
 | pipeline | discovery → collector → market chain | – | no (profile: scrape) | `docker compose run --rm pipeline` |
 | refresher | Daily stats snapshot refresh | – | no (profile: scrape) | `docker compose run --rm refresher` |
-| websites | Backfill `games.website` from Steam | – | no (profile: scrape) | `docker compose run --rm websites [--limit 300]` |
-| scanner | Detect social channels on game websites | – | no (profile: scrape) | `docker compose run --rm scanner [--limit 200]` |
-| video_prefetch | Warm per-game video cache | – | no (profile: scrape) | `docker compose run --rm video_prefetch [--limit 200]` |
+| websites | Backfill `games.website` from Steam | – | no (profile: scrape) | `docker compose run --rm websites` |
+| scanner | Detect social channels on game websites | – | no (profile: scrape) | `docker compose run --rm scanner` |
+| video_prefetch | Warm per-game video cache | – | no (profile: scrape) | `docker compose run --rm video_prefetch` |
+| reclassify | Replay the rule-based classifier over collected games (free, offline) | – | no (profile: scrape) | `docker compose run --rm reclassify` |
+| dimension_vision | Classify 2D/3D from a screenshot (needs `ANTHROPIC_API_KEY`) | – | no (profile: scrape) | `docker compose run --rm dimension_vision` |
+| dimension_similarity | Estimate 2D/3D from metadata when no tag, rule or screenshot settles it (needs `ANTHROPIC_API_KEY`) | – | no (profile: scrape) | `docker compose run --rm dimension_similarity` |
 
 Community-video flow (all optional, needs `YOUTUBE_API_KEY` / `TWITCH_*` keys
 for actual videos): `websites` → `scanner` → review at
 http://localhost:3000/admin/submissions (token = `ADMIN_TOKEN` from `.env`) →
 `video_prefetch`.
+
+Passing flags to an on-demand service requires the full command form, because
+compose replaces the service's `command:` with whatever follows the service
+name:
+
+```bash
+docker compose run --rm collector python -m scraper.collectors.run --limit 500
+docker compose run --rm discovery python -m scraper.discovery.run --mode search --include-untagged
+```
+
+Visual classification (dimension / camera / graphics style) runs as a ladder,
+cheapest first: Steam's own tags → rule-based inference from
+camera/graphics/description (free, part of the collector) → `dimension_vision`
+(reads one screenshot) → `dimension_similarity` (estimates from metadata alone).
+The last two cost real API money, never run automatically, and only ever touch
+rows still `unknown`; `games.dimension_source` records which step decided.
+
+Because `store_data` never re-runs for a game once it is DONE, improvements to
+the classifier are invisible to already-collected games. The `reclassify`
+service replays the current rules over them — free and offline, filling only
+fields that are still `unknown` and never overwriting a settled value. Always
+measure first:
+
+```bash
+docker compose run --rm reclassify python -m workers.reclassify_classification --dry-run
+docker compose run --rm reclassify
+```
+
+`engine` is the one field left deliberately empty for most games: Steam does not
+publish it, so it is only known when a developer names the engine in the store
+legal notice or description. It is never inferred by AI — an engine is a hard
+fact, not a visual observation, and guessing it would violate the data-honesty
+rule below.
 
 ## Data honesty
 

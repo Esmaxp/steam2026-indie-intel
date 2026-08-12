@@ -104,12 +104,18 @@ def _controller_support(details: dict) -> ControllerSupport:
         return ControllerSupport.FULL
     if declared == "partial":
         return ControllerSupport.PARTIAL
-    category_ids = {c.get("id") for c in details.get("categories") or []}
+    categories = details.get("categories")
+    if categories is None:
+        # No category list in the payload at all — Steam told us nothing, which
+        # is not the same as telling us there is no controller support.
+        return ControllerSupport.UNKNOWN
+    category_ids = {c.get("id") for c in categories}
     if CATEGORY_FULL_CONTROLLER in category_ids:
         return ControllerSupport.FULL
     if CATEGORY_PARTIAL_CONTROLLER in category_ids:
         return ControllerSupport.PARTIAL
-    # Steam declares controller support explicitly; no declaration = none.
+    # Steam listed the game's categories and controller support was not among
+    # them — an actual "no", declared by omission.
     return ControllerSupport.NONE
 
 
@@ -241,6 +247,9 @@ async def collect_one(
         "appid": appid,
         "name": details.get("name") or f"app_{appid}",
         "short_description": details.get("short_description"),
+        # Kept so engine rules can be replayed offline later — store_data never
+        # re-runs for a game once DONE.
+        "legal_notice": details.get("legal_notice") or "",
         "steam_store_url": f"https://store.steampowered.com/app/{appid}/",
         "steamdb_url": f"https://steamdb.info/app/{appid}/",
         "release_date": parsed.date,

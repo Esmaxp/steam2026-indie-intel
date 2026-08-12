@@ -26,6 +26,7 @@ from app.models import (
     RevenueRecord,
     SteamStats,
     Tag,
+    VideoCache,
     WishlistRecord,
     game_festivals,
 )
@@ -62,6 +63,16 @@ def latest_revenue_sq():
     )
 
 
+def video_counts_sq():
+    """Cached community-video count per game (0 rows for never-fetched games)."""
+    return (
+        sa.select(
+            VideoCache.appid,
+            sa.func.jsonb_array_length(VideoCache.payload["clips"]).label("video_count"),
+        ).subquery("video_counts")
+    )
+
+
 def next_fest_exists():
     return sa.exists(
         sa.select(sa.literal(1))
@@ -85,6 +96,7 @@ class GameFilters:
     graphics_style: GraphicsStyle | None = None
     demo_available: bool | None = None
     has_website: bool | None = None
+    has_videos: bool | None = None
     next_fest: bool | None = None
     release_status: str = "all"  # released | upcoming | all
     early_access: bool | None = None
@@ -111,6 +123,8 @@ class GamesQuery:
 def build_games_query(f: GameFilters) -> GamesQuery:
     ls, lw, lr = latest_stats_sq(), latest_wishlist_sq(), latest_revenue_sq()
     nf = next_fest_exists()
+    vc = video_counts_sq()
+    video_count = sa.func.coalesce(vc.c.video_count, 0)
 
     stmt = (
         sa.select(
@@ -137,11 +151,13 @@ def build_games_query(f: GameFilters) -> GamesQuery:
             MarketingInfo.source_name.label("budget_source"),
             MarketingInfo.source_url.label("budget_source_url"),
             nf.label("next_fest"),
+            video_count.label("video_count"),
         )
         .outerjoin(ls, ls.c.appid == Game.appid)
         .outerjoin(lw, lw.c.appid == Game.appid)
         .outerjoin(lr, lr.c.appid == Game.appid)
         .outerjoin(MarketingInfo, MarketingInfo.appid == Game.appid)
+        .outerjoin(vc, vc.c.appid == Game.appid)
     )
 
     conds = []
@@ -169,6 +185,8 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         # '' means "checked, none listed"; NULL means never checked — neither counts.
         has_site = sa.and_(Game.website.is_not(None), Game.website != "")
         conds.append(has_site if f.has_website else sa.not_(has_site))
+    if f.has_videos is not None:
+        conds.append(video_count > 0 if f.has_videos else video_count == 0)
     if f.next_fest is not None:
         conds.append(nf if f.next_fest else sa.not_(nf))
     if f.release_status == "released":
@@ -226,6 +244,7 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         "peak_ccu": ls.c.peak_ccu,
         "wishlist": lw.c.wishlist_count,
         "revenue": lr.c.gross_revenue_usd,
+        "videos": video_count,
     }
     sort_key = f.sort or "-release_date"
     descending = sort_key.startswith("-")

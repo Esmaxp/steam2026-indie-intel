@@ -225,7 +225,18 @@ export default function GamePage({
               <Fact label="Dimension">{labelFor(game.dimension)}</Fact>
               <Fact label="Camera">{labelFor(game.camera)}</Fact>
               <Fact label="Graphics">{labelFor(game.graphics_style)}</Fact>
-              <Fact label="Engine">{labelFor(game.engine)}</Fact>
+              <Fact label="Engine">
+                {game.engine === "unknown" ? (
+                  <span
+                    className="text-muted"
+                    title="Steam does not publish the engine. It is only detectable when the developer names it in the store legal notice or description."
+                  >
+                    Not published by Steam
+                  </span>
+                ) : (
+                  labelFor(game.engine)
+                )}
+              </Fact>
               <Fact label="Controller">{labelFor(game.controller_support)}</Fact>
               <Fact label="Steam Deck">{labelFor(game.steam_deck_support)}</Fact>
               <Fact label="Discovery">
