@@ -142,6 +142,28 @@
       - ./logs:/data/logs
     command: ["python", "-m", "workers.scan_websites"]
 
+  # Opt-in, costs real API money — run manually:  docker compose run --rm dimension_vision [--limit 100]
+  # Only touches games still dimension=unknown after the free rule-based pass.
+  dimension_vision:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_VISION_MODEL: ${ANTHROPIC_VISION_MODEL:-claude-opus-5}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.classify_dimension_vision"]
+
   # Scheduled worker — run daily:  docker compose run --rm refresher
   refresher:
     build:
@@ -161,6 +183,26 @@
     volumes:
       - ./logs:/data/logs
     command: ["python", "-m", "workers.refresh_stats"]
+
+  # Fast-clone restore — full catalog from the committed snapshot in seconds:
+  #   docker compose run --rm db_restore
+  #   docker compose run --rm backend alembic upgrade head
+  # Idempotent (--clean --if-exists drops and recreates dumped objects).
+  # Refresh the snapshot manually with: bash scripts/export_db.sh
+  db_restore:
+    image: postgres:16-alpine
+    profiles: ["scrape"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-steam}
+    volumes:
+      - ./database/seed:/seed:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: >
+      pg_restore --clean --if-exists --no-owner --no-privileges
+      -h db -U ${POSTGRES_USER:-steam} -d ${POSTGRES_DB:-steam2026}
+      /seed/full_export.dump
 
   # Quick-start seed — real data in ~10 minutes on a fresh clone:
   #   docker compose run --rm seed

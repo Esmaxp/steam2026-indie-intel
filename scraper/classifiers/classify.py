@@ -7,6 +7,7 @@ clear signal exists. Nothing is guessed.
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 from app.models import Camera, Dimension, GameEngine, GraphicsStyle
 
@@ -50,6 +51,15 @@ _GRAPHICS_DESC_PATTERNS = (
     (re.compile(r"\bhand[- ]?(painted|drawn)\b", re.I), GraphicsStyle.HAND_PAINTED),
 )
 
+# Self-declared dimension in store copy — the least structured signal, only
+# consulted when tags, camera, and graphics all left dimension unknown.
+_DIMENSION_DESC_PATTERNS = (
+    (re.compile(r"\bfully[- ](?:rendered )?3d\b", re.I), Dimension.THREE_D),
+    (re.compile(r"\b3d\b", re.I), Dimension.THREE_D),
+    (re.compile(r"\b2d\b", re.I), Dimension.TWO_D),
+    (re.compile(r"\bside[- ]scroll(?:ing|er)\b", re.I), Dimension.TWO_D),
+)
+
 _ENGINE_PATTERNS = (
     (re.compile(r"unreal\s*(?:®|\(r\))?\s*engine|epic games tools", re.I), GameEngine.UNREAL),
     (re.compile(r"made with unity|unity\s+(?:engine|technologies)|unity\s*®", re.I),
@@ -68,6 +78,11 @@ class Classification:
     camera: Camera
     graphics_style: GraphicsStyle
     engine: GameEngine
+    # Auditability, same idea as games.discovery_method: "tag" = the store's
+    # own 2d/2.5d/3d tag matched; "rule_based" = inferred from camera/graphics/
+    # description; "unknown" = no signal (dimension stays UNKNOWN). The vision
+    # worker writes "vision_ai" directly at the DB level.
+    dimension_source: Literal["tag", "rule_based", "unknown"] = "unknown"
 
 
 def _best_tag_match(tags: list[tuple[str, int]], mapping: dict):
@@ -80,13 +95,58 @@ def _best_tag_match(tags: list[tuple[str, int]], mapping: dict):
     return best_value
 
 
+def _infer_dimension(camera: Camera, graphics: GraphicsStyle, description: str) -> Dimension:
+    """Rule-based fallback when the store's own 2d/2.5d/3d tag is missing.
+
+    Reuses the camera and graphics signals already computed by classify().
+    Conflicting signals (e.g. a 3D low-poly side-scroller) stay UNKNOWN —
+    nothing is guessed. Description regexes are the last resort and only run
+    when camera and graphics gave no signal at all.
+    """
+    votes: set[Dimension] = set()
+
+    # A first/third-person camera is essentially never 2D.
+    if camera in (Camera.FIRST_PERSON, Camera.THIRD_PERSON):
+        votes.add(Dimension.THREE_D)
+    elif camera is Camera.SIDE_SCROLLER:
+        # Side-scrollers are virtually always 2D/2.5D sprite-based.
+        votes.add(Dimension.TWO_D)
+
+    if graphics in (
+        GraphicsStyle.VOXEL,
+        GraphicsStyle.LOW_POLY,
+        GraphicsStyle.PS1_STYLE,
+        GraphicsStyle.PS2_STYLE,
+    ):
+        # These styles are inherently 3D-rendered.
+        votes.add(Dimension.THREE_D)
+    elif graphics in (GraphicsStyle.PIXEL_ART, GraphicsStyle.HD_PIXEL_ART):
+        # Pixel art is sprite-based; isometric pixel art is the more precise
+        # 2.5D call rather than flat 2D.
+        votes.add(
+            Dimension.TWO_HALF_D if camera is Camera.ISOMETRIC else Dimension.TWO_D
+        )
+
+    if len(votes) == 1:
+        return votes.pop()
+    if votes:
+        return Dimension.UNKNOWN  # signals disagree — never guess
+
+    # No structured signal at all: explicit self-declared dimension in store copy.
+    desc_votes = {
+        dim for pattern, dim in _DIMENSION_DESC_PATTERNS if pattern.search(description)
+    }
+    if len(desc_votes) == 1:
+        return desc_votes.pop()
+    return Dimension.UNKNOWN
+
+
 def classify(
     tags: list[tuple[str, int]],
     description: str = "",
     legal_notice: str = "",
 ) -> Classification:
     """tags: (name, votes) pairs from the store page tag list."""
-    dimension = _best_tag_match(tags, _DIMENSION_TAGS) or Dimension.UNKNOWN
     camera = _best_tag_match(tags, _CAMERA_TAGS) or Camera.UNKNOWN
 
     graphics = _best_tag_match(tags, _GRAPHICS_TAGS)
@@ -102,6 +162,14 @@ def classify(
             break
     graphics = graphics or GraphicsStyle.UNKNOWN
 
+    dimension = _best_tag_match(tags, _DIMENSION_TAGS)
+    dimension_source: Literal["tag", "rule_based", "unknown"]
+    if dimension is not None:
+        dimension_source = "tag"
+    else:
+        dimension = _infer_dimension(camera, graphics, description)
+        dimension_source = "rule_based" if dimension is not Dimension.UNKNOWN else "unknown"
+
     engine = GameEngine.UNKNOWN
     engine_corpus = f"{legal_notice}\n{description}"
     for pattern, candidate in _ENGINE_PATTERNS:
@@ -110,5 +178,9 @@ def classify(
             break
 
     return Classification(
-        dimension=dimension, camera=camera, graphics_style=graphics, engine=engine
+        dimension=dimension,
+        camera=camera,
+        graphics_style=graphics,
+        engine=engine,
+        dimension_source=dimension_source,
     )

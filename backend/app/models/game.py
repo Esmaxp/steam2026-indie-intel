@@ -77,6 +77,9 @@ class Game(Base, TimestampMixin):
     dimension: Mapped[Dimension] = mapped_column(
         pg_enum(Dimension, "dimension"), default=Dimension.UNKNOWN, index=True
     )
+    # Where the 2D/3D value came from: tag (Steam's own 2d/2.5d/3d tag) |
+    # rule_based (camera/graphics/description fallback) | vision_ai | unknown.
+    dimension_source: Mapped[str] = mapped_column(Text, default="unknown")
     camera: Mapped[Camera] = mapped_column(pg_enum(Camera, "camera"), default=Camera.UNKNOWN)
     graphics_style: Mapped[GraphicsStyle] = mapped_column(
         pg_enum(GraphicsStyle, "graphics_style"), default=GraphicsStyle.UNKNOWN
@@ -96,6 +99,9 @@ class Game(Base, TimestampMixin):
     )
     # Mass-publishing pattern (same company, 5+ releases in 30 days).
     low_quality_signal: Mapped[bool] = mapped_column(Boolean, default=False)
+    # How the game entered the catalog: indie_tag (Steam Indie genre/tag) |
+    # self_published_no_tag | boutique_label_no_tag (opt-in applist fallback).
+    discovery_method: Mapped[str] = mapped_column(Text, default="indie_tag", index=True)
     first_seen_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -108,7 +114,7 @@ class Game(Base, TimestampMixin):
         secondary=game_publishers, back_populates="games"
     )
     genres: Mapped[list["Genre"]] = relationship(  # noqa: F821
-        secondary=game_genres, back_populates="games"
+        secondary=game_genres, back_populates="games", order_by=game_genres.c.rank
     )
     tags: Mapped[list["Tag"]] = relationship(  # noqa: F821
         secondary=game_tags, back_populates="games", order_by=game_tags.c.rank

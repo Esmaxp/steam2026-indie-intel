@@ -159,8 +159,17 @@ async def collect_one(
     )
     tag_indie = any(name.strip().lower() == "indie" for name, _ in tags)
     if not genre_indie and not tag_indie:
-        await _remove_game(db, appid)
-        return SyncStatus.SKIPPED, "not_indie"
+        # Games admitted by the opt-in tag-less applist path have no Indie
+        # genre/tag by definition — deleting them here would silently undo
+        # discovery (same failure mode the tag-only rule above fixes).
+        method = (
+            await db.execute(
+                sa.select(Game.discovery_method).where(Game.appid == appid)
+            )
+        ).scalar_one_or_none()
+        if method not in ("self_published_no_tag", "boutique_label_no_tag"):
+            await _remove_game(db, appid)
+            return SyncStatus.SKIPPED, "not_indie"
     tag_only_indie = not genre_indie
 
     try:
@@ -197,10 +206,15 @@ async def collect_one(
         from app.models import IndieConfidence
         from scraper.classifiers.indie_signals import IndieSignal
 
+        suffix = (
+            " (Indie via store tag only — genre missing)"
+            if tag_indie
+            else " (no Indie genre/tag — admitted via publisher signal)"
+        )
         indie_signal = IndieSignal(
             confidence=IndieConfidence.LOW,
             is_indie=True,
-            reason=indie_signal.reason + " (Indie via store tag only — genre missing)",
+            reason=indie_signal.reason + suffix,
         )
     coming_soon = bool(release_info.get("coming_soon"))
     is_released = not coming_soon and parsed.date is not None
@@ -250,6 +264,7 @@ async def collect_one(
         # '' = appdetails checked, no website listed (backfill worker skips it).
         "website": (details.get("website") or "").strip(),
         "dimension": result.dimension,
+        "dimension_source": result.dimension_source,
         "camera": result.camera,
         "graphics_style": result.graphics_style,
         "engine": result.engine,
@@ -302,6 +317,8 @@ async def collect_one(
     )
 
     # --- genres & tags ------------------------------------------------------
+    # dict keyed by genre_id dedupes while preserving Steam's original order;
+    # rank mirrors the tag-rank pattern below.
     genre_ids = {}
     for genre in genres:
         genre_name = genre.get("description", "").strip()
@@ -313,7 +330,10 @@ async def collect_one(
             ] = True
     await _replace_links(
         db, game_genres, appid,
-        [{"appid": appid, "genre_id": i} for i in genre_ids],
+        [
+            {"appid": appid, "genre_id": genre_id, "rank": rank}
+            for rank, genre_id in enumerate(genre_ids, start=1)
+        ],
     )
 
     tag_rows_by_id: dict[int, dict] = {}

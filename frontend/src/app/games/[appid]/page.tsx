@@ -228,6 +228,19 @@ export default function GamePage({
               <Fact label="Engine">{labelFor(game.engine)}</Fact>
               <Fact label="Controller">{labelFor(game.controller_support)}</Fact>
               <Fact label="Steam Deck">{labelFor(game.steam_deck_support)}</Fact>
+              <Fact label="Discovery">
+                {game.discovery_method === "self_published_no_tag" ? (
+                  <span title="No Steam Indie genre/tag — admitted because developer == publisher">
+                    Self-published <Badge className="ml-1 border-amber-500/40 px-1.5 py-0 text-amber-600">no tag</Badge>
+                  </span>
+                ) : game.discovery_method === "boutique_label_no_tag" ? (
+                  <span title="No Steam Indie genre/tag — admitted via a known boutique indie label">
+                    Boutique label <Badge className="ml-1 border-amber-500/40 px-1.5 py-0 text-amber-600">no tag</Badge>
+                  </span>
+                ) : (
+                  "Indie tag"
+                )}
+              </Fact>
             </dl>
             {game.supported_languages.length > 0 ? (
               <p className="text-xs text-muted">

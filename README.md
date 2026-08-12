@@ -36,8 +36,27 @@ in order; each states its expected outcome.
      `{"status":"ok","database":"ok"}`
    - http://localhost:3000 loads the dashboard (empty until step 3)
 
-3. **Seed real data** (~10 minutes — discovers ~100 games from Steam Search,
-   collects full store data for the first 50):
+3. **Load data — pick ONE of the three options below.**
+
+   **(a) Fast option — restore the pre-exported catalog** (seconds; skips
+   discovery/collection entirely; the dump ships with the repo — ~13 MB,
+   snapshot details in `database/seed/full_export.meta.txt`):
+
+   ```bash
+   docker compose run --rm db_restore
+   docker compose run --rm backend alembic upgrade head   # in case migrations landed after the export
+   ```
+
+   Expected outcome: the dashboard shows ~14,000+ games immediately. The
+   snapshot date is in `database/seed/full_export.meta.txt` — prices,
+   reviews and wishlist/revenue estimates are only as fresh as that date.
+   Run `docker compose run --rm refresher` afterward for current stats, or
+   `pipeline` to re-discover games released since the snapshot. Safe to
+   re-run (the restore drops and recreates the dumped objects).
+
+   **(b) Quick sample — run the real pipeline on ~50 games** (~10 minutes;
+   use this if you specifically want to test the collection pipeline
+   itself):
 
    ```bash
    docker compose run --rm seed
@@ -47,8 +66,8 @@ in order; each states its expected outcome.
    games with names, tags, prices and images. Safe to re-run or interrupt —
    progress is checkpointed per game.
 
-4. **(Optional) full pipeline** — process the entire discovery queue and
-   collect market data (takes hours, rate-limited on purpose):
+   **(c) Full fresh collection** — process the entire discovery queue and
+   collect market data from scratch (takes hours, rate-limited on purpose):
 
    ```bash
    docker compose run --rm pipeline
@@ -74,6 +93,7 @@ in order; each states its expected outcome.
 | db | PostgreSQL 16 storage | 5432 | yes | `docker compose up` |
 | backend | FastAPI REST API + migrations | 8000 | yes | `docker compose up` |
 | frontend | Next.js dashboard | 3000 | yes | `docker compose up` |
+| db_restore | Restore the committed full-catalog snapshot | – | no (profile: scrape) | `docker compose run --rm db_restore` |
 | seed | Quick-start data seed (~50 games) | – | no (profile: scrape) | `docker compose run --rm seed` |
 | discovery | Find 2026 indie games on Steam | – | no (profile: scrape) | `docker compose run --rm discovery [--mode search\|applist]` |
 | collector | Full store data per queued game | – | no (profile: scrape) | `docker compose run --rm collector [--limit 500]` |

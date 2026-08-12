@@ -1,0 +1,9 @@
+exported_at: 2026-08-12T08:24:30Z
+games_rows: 14208
+alembic_revision: 0010 (head)
+dump_size: 13M
+restore: docker compose run --rm db_restore
+then:    docker compose run --rm backend alembic upgrade head
+note: prices/reviews/estimates are only as fresh as exported_at; run
+      'docker compose run --rm refresher' for current stats, or 'pipeline'
+      to re-discover games released since this snapshot.

@@ -157,6 +157,10 @@ class RevenueEstimateOut(BaseModel):
 class GameDetail(GameListItem):
     short_description: str | None = None
     website: str | None = None
+    # indie_tag | self_published_no_tag | boutique_label_no_tag
+    discovery_method: str = "indie_tag"
+    # tag | rule_based | vision_ai | unknown
+    dimension_source: str = "unknown"
     supported_languages: list[str] = []
     controller_support: str = "unknown"
     steam_deck_support: str = "unknown"

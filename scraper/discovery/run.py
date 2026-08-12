@@ -34,6 +34,13 @@ def main() -> None:
         help="targeted mode: check specific AppID(s) (comma-separated) without "
         "a full scan — for freshly listed games the search passes missed",
     )
+    parser.add_argument(
+        "--include-untagged",
+        action="store_true",
+        help="applist mode only: also admit games WITHOUT the Steam Indie "
+        "genre/tag when they are self-published or on a known boutique indie "
+        "label. Off by default — scope-widening is opt-in.",
+    )
     args = parser.parse_args()
 
     logger = setup_logging("discovery")
@@ -50,7 +57,9 @@ def main() -> None:
     elif args.mode == "search":
         summary = asyncio.run(run_search_discovery(max_pages=args.max_pages))
     else:
-        summary = asyncio.run(run_applist_discovery(limit=args.limit))
+        summary = asyncio.run(
+            run_applist_discovery(limit=args.limit, include_untagged=args.include_untagged)
+        )
     logger.info("Summary: %s", summary)
 
 

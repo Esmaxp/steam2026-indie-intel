@@ -7,10 +7,17 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+} from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
-import { fetchGames } from "@/lib/api";
+import { Fragment, useMemo, useState } from "react";
+import { fetchGame, fetchGames } from "@/lib/api";
 import {
   DASH,
   fmtCompact,
@@ -29,6 +36,14 @@ import { Pagination } from "@/components/pagination";
 
 const col = createColumnHelper<GameListItem>();
 
+/** Passed via table meta so column cells can drive the inline row expansion. */
+interface ExpandMeta {
+  expandedAppid: number | null;
+  toggleExpanded: (appid: number) => void;
+}
+
+const GENRES_SHOWN = 4;
+
 /** Columns whose header click drives server-side sorting. */
 const SORTABLE: Record<string, string> = {
   name: "name",
@@ -41,6 +56,19 @@ const SORTABLE: Record<string, string> = {
 };
 
 const columns = [
+  col.display({
+    id: "expand",
+    header: "",
+    cell: (info) => {
+      const meta = info.table.options.meta as ExpandMeta;
+      const expanded = meta.expandedAppid === info.row.original.appid;
+      return expanded ? (
+        <ChevronDown size={14} className="text-accent" aria-hidden />
+      ) : (
+        <ChevronRight size={14} className="text-muted" aria-hidden />
+      );
+    },
+  }),
   col.accessor("name", {
     id: "name",
     header: "Game",
@@ -49,6 +77,7 @@ const columns = [
       return (
         <Link
           href={`/games/${game.appid}`}
+          onClick={(e) => e.stopPropagation()}
           className="flex items-center gap-2 font-medium text-ink hover:text-accent"
         >
           {game.capsule_image_url ? (
@@ -120,15 +149,28 @@ const columns = [
   col.accessor((g) => g.genres.join(", "), {
     id: "genres",
     header: "Genres",
-    cell: (info) => (
-      <span className="block max-w-36 truncate text-ink2">{info.getValue() || DASH}</span>
-    ),
+    cell: (info) => {
+      const genres = info.row.original.genres;
+      if (genres.length === 0) return <span className="text-ink2">{DASH}</span>;
+      // Server-ordered by rank, so the first 4 are Steam's most relevant.
+      const extra = genres.length - GENRES_SHOWN;
+      return (
+        <span className="block max-w-40 text-ink2">
+          {genres.slice(0, GENRES_SHOWN).join(", ")}
+          {extra > 0 ? (
+            <span className="ml-1 whitespace-nowrap text-xs text-accent">+{extra}</span>
+          ) : null}
+        </span>
+      );
+    },
   }),
   col.accessor((g) => g.tags.join(", "), {
     id: "tags",
     header: "Steam Tags",
+    // Compact while collapsed; the full list lives in the expanded panel
+    // (native title tooltips are unreliable and don't work on touch).
     cell: (info) => (
-      <span className="block max-w-48 truncate text-ink2" title={info.getValue()}>
+      <span className="block max-w-48 truncate text-ink2">
         {info.getValue() || DASH}
       </span>
     ),
@@ -216,6 +258,7 @@ const columns = [
               href={game.steam_store_url}
               target="_blank"
               rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-0.5 text-accent hover:underline"
             >
               Steam <ExternalLink size={11} aria-hidden />
@@ -226,6 +269,7 @@ const columns = [
               href={game.steamdb_url}
               target="_blank"
               rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-0.5 text-ink2 hover:underline"
             >
               SteamDB <ExternalLink size={11} aria-hidden />
@@ -237,8 +281,97 @@ const columns = [
   }),
 ];
 
+/** Inline detail panel — fetches full game data only when its row is expanded. */
+function ExpandedRow({ game }: { game: GameListItem }) {
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ["game", game.appid],
+    queryFn: () => fetchGame(game.appid),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isLoading || !detail) {
+    return (
+      <div className="flex flex-col gap-2 p-4">
+        <div className="h-3 w-2/3 animate-pulse rounded bg-grid" />
+        <div className="h-3 w-1/2 animate-pulse rounded bg-grid" />
+      </div>
+    );
+  }
+
+  const screenshots = detail.media
+    .filter((m) => m.media_type === "screenshot")
+    .slice(0, 4);
+
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      {detail.short_description ? (
+        <p className="max-w-4xl text-sm text-ink2">{detail.short_description}</p>
+      ) : null}
+
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-2 text-sm">
+        <div>
+          <div className="text-xs text-muted">Genres ({detail.genres.length})</div>
+          <div className="mt-1 flex max-w-md flex-wrap gap-1">
+            {detail.genres.length > 0
+              ? detail.genres.map((genre) => <Badge key={genre}>{genre}</Badge>)
+              : DASH}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-muted">Steam Tags ({detail.tags_full.length})</div>
+          <div className="mt-1 flex max-w-2xl flex-wrap gap-1">
+            {detail.tags_full.length > 0
+              ? detail.tags_full.map((tag) => (
+                  <Badge key={tag.name}>{tag.name}</Badge>
+                ))
+              : DASH}
+          </div>
+        </div>
+        <div className="flex gap-6">
+          <div>
+            <div className="text-xs text-muted">Camera</div>
+            <div className="mt-1">{labelFor(detail.camera)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted">Graphics</div>
+            <div className="mt-1">{labelFor(detail.graphics_style)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted">Steam Deck</div>
+            <div className="mt-1">{labelFor(detail.steam_deck_support)}</div>
+          </div>
+        </div>
+      </div>
+
+      {screenshots.length > 0 ? (
+        <div className="flex gap-2">
+          {screenshots.map((shot) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={shot.url}
+              src={shot.thumbnail_url ?? shot.url}
+              alt=""
+              loading="lazy"
+              className="h-20 rounded-md border border-hairline"
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <Link
+        href={`/games/${game.appid}`}
+        onClick={(e) => e.stopPropagation()}
+        className="w-fit text-sm text-accent hover:underline"
+      >
+        Full details →
+      </Link>
+    </div>
+  );
+}
+
 export function GamesTable() {
   const { searchParams, setParams } = useFilterParams();
+  const [expandedAppid, setExpandedAppid] = useState<number | null>(null);
 
   const apiParams = useMemo(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -252,10 +385,14 @@ export function GamesTable() {
     placeholderData: keepPreviousData,
   });
 
+  const toggleExpanded = (appid: number) =>
+    setExpandedAppid((current) => (current === appid ? null : appid));
+
   const table = useReactTable({
     data: data?.items ?? [],
     columns,
     getCoreRowModel: getCoreRowModel(),
+    meta: { expandedAppid, toggleExpanded } satisfies ExpandMeta,
   });
 
   const currentSort = searchParams.get("sort") ?? "-release_date";
@@ -330,16 +467,25 @@ export function GamesTable() {
                   </tr>
                 ))
               : table.getRowModel().rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-b border-grid/60 last:border-0 hover:bg-grid/20"
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-3 py-2 align-top">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
+                  <Fragment key={row.id}>
+                    <tr
+                      onClick={() => toggleExpanded(row.original.appid)}
+                      className="cursor-pointer border-b border-grid/60 last:border-0 hover:bg-grid/20"
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} className="px-3 py-2 align-top">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
+                    {expandedAppid === row.original.appid ? (
+                      <tr className="border-b border-grid/60 bg-grid/10">
+                        <td colSpan={columns.length}>
+                          <ExpandedRow game={row.original} />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 ))}
             {!isLoading && data && data.items.length === 0 ? (
               <tr>

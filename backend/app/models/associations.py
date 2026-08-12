@@ -33,6 +33,8 @@ game_genres = Table(
     Base.metadata,
     Column("appid", BigInteger, ForeignKey("games.appid", ondelete="CASCADE"), primary_key=True),
     Column("genre_id", Integer, ForeignKey("genres.id", ondelete="CASCADE"), primary_key=True),
+    # Steam's original appdetails order — mirrors game_tags.rank.
+    Column("rank", Integer, nullable=False, server_default="1"),
 )
 
 game_tags = Table(

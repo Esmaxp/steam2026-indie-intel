@@ -35,7 +35,8 @@ APPDETAILS_MIN_INTERVAL = 1.5  # seconds between appdetails requests
 
 
 async def upsert_game(session, appid: int, name: str, release: ParsedRelease,
-                      coming_soon: bool | None = None) -> None:
+                      coming_soon: bool | None = None,
+                      discovery_method: str = "indie_tag") -> None:
     is_released = release.date is not None and release.date <= datetime.date.today()
     if coming_soon is None:
         coming_soon = not is_released
@@ -49,6 +50,9 @@ async def upsert_game(session, appid: int, name: str, release: ParsedRelease,
         is_released=is_released,
         coming_soon=coming_soon,
         is_indie=True,
+        # Audit trail; deliberately NOT in the conflict-update set below —
+        # the first admission path wins, re-discovery never rewrites it.
+        discovery_method=discovery_method,
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=[Game.appid],
@@ -160,8 +164,12 @@ async def run_targeted_discovery(appids: list[int]) -> dict:
     return {"mode": "targeted", "results": results}
 
 
-async def run_applist_discovery(limit: int = 500) -> dict:
-    """Exhaustive, resumable App List scan. Validates `limit` pending apps per run."""
+async def run_applist_discovery(limit: int = 500, include_untagged: bool = False) -> dict:
+    """Exhaustive, resumable App List scan. Validates `limit` pending apps per run.
+
+    include_untagged=False keeps today's behavior exactly (Indie tag mandatory).
+    True additionally admits tag-less games with a self-published or boutique-
+    label publisher signal (see applist.evaluate_app)."""
     async with make_session() as http:
         applist_client = SteamClient(http, min_interval=1.0)
         details_client = SteamClient(http, min_interval=APPDETAILS_MIN_INTERVAL)
@@ -180,7 +188,9 @@ async def run_applist_discovery(limit: int = 500) -> dict:
         async with async_session_factory() as db:
             for appid in tqdm(queue, desc="appdetails", unit="app"):
                 try:
-                    check = await check_app(details_client, appid, TARGET_YEAR)
+                    check = await check_app(
+                        details_client, appid, TARGET_YEAR, include_untagged
+                    )
                 except Exception as exc:
                     failed += 1
                     await mark(db, appid, SyncStage.DISCOVERY, SyncStatus.FAILED, str(exc)[:500])
@@ -190,7 +200,8 @@ async def run_applist_discovery(limit: int = 500) -> dict:
 
                 if check.keep:
                     await upsert_game(db, check.appid, check.name, check.release,
-                                      coming_soon=check.coming_soon)
+                                      coming_soon=check.coming_soon,
+                                      discovery_method=check.discovery_method)
                     kept += 1
                 else:
                     await mark(db, appid, SyncStage.DISCOVERY, SyncStatus.SKIPPED, check.reason)

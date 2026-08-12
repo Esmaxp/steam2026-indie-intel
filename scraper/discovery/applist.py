@@ -9,6 +9,8 @@ and can run incrementally over many sessions.
 import logging
 from dataclasses import dataclass
 
+from app.models import IndieConfidence
+from scraper.classifiers.indie_signals import score_indie_signals
 from scraper.common.http import SteamClient
 from scraper.discovery.release_date import ParsedRelease, parse_release
 
@@ -35,18 +37,16 @@ class AppCheck:
     name: str | None = None
     release: ParsedRelease | None = None
     coming_soon: bool = False
+    # How the app qualified — auditable downstream, same idea as
+    # channel_submissions.source: indie_tag (Steam Indie genre present) |
+    # self_published_no_tag | boutique_label_no_tag (tag-less fallback).
+    discovery_method: str = "indie_tag"
 
 
-async def check_app(client: SteamClient, appid: int, target_year: int) -> AppCheck:
-    """Fetch appdetails and decide whether this is a <target_year> indie game."""
-    data = await client.get_json(
-        APP_DETAILS_URL, params={"appids": appid, "cc": "us", "l": "english"}
-    )
-    entry = data.get(str(appid)) or {}
-    if not entry.get("success") or not entry.get("data"):
-        return AppCheck(appid, keep=False, reason="no_store_data")
-
-    details = entry["data"]
+def evaluate_app(
+    appid: int, details: dict, target_year: int, include_untagged: bool = False
+) -> AppCheck:
+    """Pure keep/drop decision over an appdetails payload (testable offline)."""
     if details.get("type") != "game":
         return AppCheck(appid, keep=False, reason=f"type_{details.get('type', 'unknown')}")
 
@@ -55,8 +55,27 @@ async def check_app(client: SteamClient, appid: int, target_year: int) -> AppChe
         str(g.get("id")) == INDIE_GENRE_ID or str(g.get("description", "")).lower() == "indie"
         for g in genres
     )
+    discovery_method = "indie_tag"
     if not is_indie:
-        return AppCheck(appid, keep=False, reason="not_indie")
+        if not include_untagged:
+            return AppCheck(appid, keep=False, reason="not_indie")
+        # Opt-in fallback: only the two publisher signals reliable enough to
+        # stand in for the missing tag. The generic "third-party publisher,
+        # not on any known-large list" MEDIUM branch stays tag-gated — it
+        # would admit droves of non-indie small/mid studios.
+        signal = score_indie_signals(
+            details.get("developers") or [], details.get("publishers") or []
+        )
+        if signal.is_indie and signal.confidence == IndieConfidence.HIGH:
+            discovery_method = "self_published_no_tag"
+        elif (
+            signal.is_indie
+            and signal.confidence == IndieConfidence.MEDIUM
+            and signal.reason.startswith("boutique")
+        ):
+            discovery_method = "boutique_label_no_tag"
+        else:
+            return AppCheck(appid, keep=False, reason="not_indie_no_tag")
 
     release_info = details.get("release_date") or {}
     parsed = parse_release(release_info.get("date"))
@@ -70,4 +89,19 @@ async def check_app(client: SteamClient, appid: int, target_year: int) -> AppChe
         name=details.get("name"),
         release=parsed,
         coming_soon=bool(release_info.get("coming_soon")),
+        discovery_method=discovery_method,
     )
+
+
+async def check_app(
+    client: SteamClient, appid: int, target_year: int, include_untagged: bool = False
+) -> AppCheck:
+    """Fetch appdetails and decide whether this is a <target_year> indie game."""
+    data = await client.get_json(
+        APP_DETAILS_URL, params={"appids": appid, "cc": "us", "l": "english"}
+    )
+    entry = data.get(str(appid)) or {}
+    if not entry.get("success") or not entry.get("data"):
+        return AppCheck(appid, keep=False, reason="no_store_data")
+
+    return evaluate_app(appid, entry["data"], target_year, include_untagged)
