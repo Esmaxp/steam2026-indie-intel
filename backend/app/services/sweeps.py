@@ -13,6 +13,11 @@ already hit once).
 A backend restart kills any in-flight run. That is recorded rather than
 hidden: migration 0014 marks surviving rows `interrupted` on startup, and
 every collector is resumable, so re-running continues where it stopped.
+
+Progress reporting and the pause/stop checks are NOT implemented here — they
+come from scraper.common.job_control, which the CLI sweep scripts use too. One
+implementation means the admin UI's buttons work identically whichever way a
+sweep was started.
 """
 
 import asyncio
@@ -42,17 +47,6 @@ async def _set(job_id: int, **values) -> None:
         await db.commit()
 
 
-async def _merge_progress(job_id: int, kind: str, payload: dict) -> None:
-    async with async_session_factory() as db:
-        job = await db.get(SweepJob, job_id)
-        if job is None:
-            return
-        progress = dict(job.progress or {})
-        progress[kind] = payload
-        job.progress = progress
-        await db.commit()
-
-
 async def _cancel_requested(job_id: int) -> bool:
     async with async_session_factory() as db:
         return bool(
@@ -65,8 +59,9 @@ async def _cancel_requested(job_id: int) -> bool:
 async def _run_kind(job: SweepJob, kind: str) -> dict:
     """Dispatch one collector. Imported lazily so the API starts even if the
     scraper packages are missing from an older image."""
-    on_progress = lambda payload: _merge_progress(job.id, kind, payload)  # noqa: E731
-    should_stop = lambda: _cancel_requested(job.id)  # noqa: E731
+    from scraper.common.job_control import make_controls
+
+    on_progress, should_stop = make_controls(job.id, kind)
 
     if kind == "followers":
         from workers.refresh_followers import run as run_followers
@@ -99,7 +94,8 @@ async def _run_kind(job: SweepJob, kind: str) -> dict:
 
     if kind == "rank":
         # The chart is a single global list Valve orders itself, so a release
-        # window does not apply. ~53 requests, a few minutes.
+        # window does not apply. ~53 requests, a few minutes. It takes no
+        # control hooks — at a few minutes long, pausing it has no value.
         from scraper.collectors.wishlist_rank import run_rank_sweep
 
         return await run_rank_sweep(dry_run=False)
@@ -122,19 +118,23 @@ async def _execute(job_id: int) -> None:
             )
         await _set(job_id, status="running", started_at=datetime.datetime.now(datetime.timezone.utc))
 
+        from scraper.common.job_control import report
+
         results: dict = {}
         try:
             for kind in kinds:
                 if await _cancel_requested(job_id):
                     break
                 logger.info("sweep %s: starting %s", job_id, kind)
+                await _set(job_id, active_kind=kind)
                 summary = await _run_kind(snapshot, kind)
                 results[kind] = summary
-                await _merge_progress(job_id, kind, {**summary, "done": True})
+                await report(job_id, kind, {**summary, "done": True})
         except Exception as exc:  # noqa: BLE001 — surface it on the job row
             logger.exception("sweep %s failed", job_id)
             await _set(
                 job_id, status="failed", error=f"{exc.__class__.__name__}: {exc}"[:2000],
+                paused=False, active_kind=None,
                 finished_at=datetime.datetime.now(datetime.timezone.utc),
             )
             return
@@ -143,6 +143,10 @@ async def _execute(job_id: int) -> None:
         await _set(
             job_id,
             status="cancelled" if cancelled else "done",
+            # Clear the hold, so a paused-then-cancelled job does not come back
+            # looking pausable in the UI.
+            paused=False,
+            active_kind=None,
             finished_at=datetime.datetime.now(datetime.timezone.utc),
         )
         logger.info("sweep %s finished: %s", job_id, results)

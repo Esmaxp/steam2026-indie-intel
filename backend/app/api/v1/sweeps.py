@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.videos import require_admin
 from app.db.session import get_db
 from app.models import SWEEP_KINDS, SweepJob
-from app.services import sweeps
+from app.services import sweep_eta, sweeps
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -50,32 +50,62 @@ class SweepOut(BaseModel):
     limit_per_kind: int | None = None
     status: str
     cancel_requested: bool
+    paused: bool = False
     created_at: datetime.datetime
     started_at: datetime.datetime | None = None
     finished_at: datetime.datetime | None = None
+    # Last sign of life from the executing process. A CLI-driven sweep runs
+    # outside this API, so a stale heartbeat is the only way to tell that its
+    # shell loop was killed.
+    heartbeat_at: datetime.datetime | None = None
+    active_kind: str | None = None
+    # "api" (run inside the backend) or "cli" (run by a sweep script).
+    runner: str | None = None
     progress: dict = {}
     error: str | None = None
+    # Work left and how long it should take. `eta_basis` says whether the
+    # rate was measured from real throughput or assumed from the configured
+    # request interval — the UI should not imply precision it does not have.
+    remaining: int | None = None
+    eta_seconds: int | None = None
+    eta_basis: str | None = None
 
 
-def _out(job: SweepJob) -> SweepOut:
+def _out(job: SweepJob, eta: dict | None = None) -> SweepOut:
+    eta = eta or {}
     return SweepOut(
         id=job.id, kinds=list(job.kinds), release_from=job.release_from,
         release_to=job.release_to, limit_per_kind=job.limit_per_kind,
         status=job.status, cancel_requested=job.cancel_requested,
-        created_at=job.created_at, started_at=job.started_at,
-        finished_at=job.finished_at, progress=job.progress or {}, error=job.error,
+        paused=job.paused, created_at=job.created_at, started_at=job.started_at,
+        finished_at=job.finished_at, heartbeat_at=job.heartbeat_at,
+        active_kind=job.active_kind, runner=job.runner,
+        progress=job.progress or {}, error=job.error,
+        remaining=eta.get("remaining"), eta_seconds=eta.get("eta_seconds"),
+        eta_basis=eta.get("basis"),
     )
 
 
 @router.post("/sweeps", response_model=SweepOut, status_code=202)
 async def start_sweep(body: SweepRequest, db: AsyncSession = Depends(get_db)) -> SweepOut:
     """Queue a run and return immediately — these take minutes to hours."""
-    if sweeps.is_running():
-        # One at a time on purpose: concurrent sweeps multiply the request
-        # rate against Steam, which is the failure this project already hit.
+    # One at a time on purpose: concurrent sweeps multiply the request rate
+    # against Steam, which is the failure this project already hit. The check
+    # is against the sweep_jobs table, not just this process — a CLI sweep
+    # hits Steam exactly as hard, and is_running() cannot see it.
+    live = await db.scalar(
+        sa.select(SweepJob.id)
+        .where(SweepJob.status.in_(("queued", "running", "paused")))
+        .limit(1)
+    )
+    if live is not None or sweeps.is_running():
         raise HTTPException(
             status_code=409,
-            detail="A sweep is already running. Wait for it, or cancel it first.",
+            detail=(
+                f"Sweep {live} is already running. Wait for it, or stop it first."
+                if live is not None
+                else "A sweep is already running. Wait for it, or stop it first."
+            ),
         )
     if (
         body.release_from is not None
@@ -89,6 +119,8 @@ async def start_sweep(body: SweepRequest, db: AsyncSession = Depends(get_db)) ->
         release_from=body.release_from,
         release_to=body.release_to,
         limit_per_kind=body.limit_per_kind or None,
+        # Owned by this process, so a restart is known to have killed it.
+        runner="api",
     )
     db.add(job)
     await db.commit()
@@ -105,7 +137,41 @@ async def list_sweeps(db: AsyncSession = Depends(get_db)) -> list[SweepOut]:
             sa.select(SweepJob).order_by(SweepJob.created_at.desc()).limit(MAX_LISTED)
         )
     ).scalars().all()
-    return [_out(job) for job in rows]
+    out = []
+    for job in rows:
+        # Only compute for a live job: a finished one has no work left, and
+        # the estimate costs a couple of aggregate queries.
+        eta = (
+            await sweep_eta.estimate(db, job)
+            if job.status in ("queued", "running", "paused")
+            else None
+        )
+        out.append(_out(job, eta))
+    return out
+
+
+@router.post("/sweeps/{job_id}/pause", response_model=SweepOut)
+async def pause_sweep(job_id: int, db: AsyncSession = Depends(get_db)) -> SweepOut:
+    """Hold position. The worker checks between games, so it parks within one
+    request interval and keeps everything already collected."""
+    return await _set_flag(job_id, db, paused=True)
+
+
+@router.post("/sweeps/{job_id}/resume", response_model=SweepOut)
+async def resume_sweep(job_id: int, db: AsyncSession = Depends(get_db)) -> SweepOut:
+    return await _set_flag(job_id, db, paused=False)
+
+
+async def _set_flag(job_id: int, db: AsyncSession, *, paused: bool) -> SweepOut:
+    job = await db.get(SweepJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+    if job.status in ("done", "failed", "cancelled", "interrupted"):
+        raise HTTPException(status_code=409, detail=f"Sweep is already {job.status}")
+    job.paused = paused
+    await db.commit()
+    await db.refresh(job)
+    return _out(job)
 
 
 @router.post("/sweeps/{job_id}/cancel", response_model=SweepOut)

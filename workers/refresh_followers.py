@@ -38,7 +38,9 @@ from scraper.common.logging import setup_logging
 SOURCE_NAME = "steamcommunity.com (hub members)"
 # Flush to the database this often so a multi-hour sweep is crash-safe.
 COMMIT_EVERY = 50
-PROGRESS_EVERY = 100
+# Every 25 games is ~100s at the 4s interval. Also the heartbeat cadence, so
+# the admin UI notices a dead sweep long before it notices a slow one.
+PROGRESS_EVERY = 25
 
 
 def latest_follower_sq():
@@ -157,6 +159,10 @@ async def run(
                     if on_progress is not None:
                         await on_progress({
                             "total": len(appids), "processed": index,
+                            # Reported so the ETA can count remaining work over
+                            # the same slice of the catalogue this run covers,
+                            # rather than assuming the whole thing.
+                            "include_released": include_released,
                             "written": written, "no_group": no_group, "failed": failed,
                         })
                 # Checked between games so a stop lands within one interval
@@ -205,7 +211,21 @@ def main() -> None:
         default=float(os.environ.get("FOLLOWERS_MIN_INTERVAL", DEFAULT_MIN_INTERVAL)),
         help="seconds between requests (default 4.0, or FOLLOWERS_MIN_INTERVAL)",
     )
+    parser.add_argument(
+        "--job-id",
+        type=int,
+        default=None,
+        help="attach to a sweep_jobs row so the admin UI can show progress "
+             "and pause/stop this run",
+    )
     args = parser.parse_args()
+
+    on_progress = should_stop = None
+    if args.job_id is not None:
+        from scraper.common.job_control import make_controls
+
+        on_progress, should_stop = make_controls(args.job_id, "followers")
+
     asyncio.run(
         run(
             limit=args.limit,
@@ -213,6 +233,8 @@ def main() -> None:
             include_released=args.include_released,
             dry_run=args.dry_run,
             interval=args.interval,
+            on_progress=on_progress,
+            should_stop=should_stop,
         )
     )
 

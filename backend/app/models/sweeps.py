@@ -37,6 +37,16 @@ class SweepJob(Base):
     cancel_requested: Mapped[bool] = mapped_column(
         Boolean, server_default="false", nullable=False
     )
+    # Distinct from cancel_requested: stop is terminal, pause holds position.
+    paused: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
+    # Last sign of life from the executing process. A CLI batch runs outside
+    # the backend, so this is the only way to tell a live job from one whose
+    # shell loop was killed.
+    heartbeat_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    active_kind: Mapped[str | None] = mapped_column(Text)
+    # Which process owns this row: "api" (in the backend) or "cli" (a sweep
+    # script). The backend clears only its own on startup.
+    runner: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

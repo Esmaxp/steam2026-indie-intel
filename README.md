@@ -186,6 +186,28 @@ narrow which games are scanned by release date, and watch live progress. One
 sweep runs at a time so concurrent runs cannot multiply the request rate
 against Steam.
 
+Each run shows when it started, how long it has been going, and how much is
+left. The ETA is labelled **measured** when it comes from observed throughput
+and **assumed rate** when it is arithmetic on the configured request interval —
+a full-catalogue follower sweep is ~18h at 4s per game, disclosures ~8h at
+1.5s. **Pause** holds position between games and keeps everything collected;
+**Continue** picks up where it stopped; **Stop** ends the run. Every collector
+is resumable, so none of the three loses work.
+
+The same controls reach the long CLI sweeps, which are the practical way to run
+a full catalogue pass because they survive a backend restart:
+
+```bash
+nohup bash scripts/sweep-followers.sh --include-released > logs/follower-sweep.log 2>&1 &
+nohup bash scripts/sweep-disclosures.sh --write > logs/disclosure-sweep.log 2>&1 &
+```
+
+Each script registers a `sweep_jobs` row and passes its id to every batch, so
+it appears in the admin UI alongside API-launched runs and honours the same
+buttons. A run whose heartbeat has gone quiet is flagged there: a CLI sweep is
+a separate process the backend cannot otherwise observe, so a killed shell loop
+would look "running" forever.
+
 > **The /admin routes are unauthenticated.** Admin auth is not implemented
 > yet, so anyone who can reach the API can approve submissions and start
 > hours-long sweeps. Keep port 9100 bound to localhost until it is.

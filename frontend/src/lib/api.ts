@@ -131,3 +131,13 @@ export function startSweep(body: SweepRequestBody) {
 export function cancelSweep(id: number) {
   return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/cancel`, {});
 }
+
+/** Hold position. The worker parks between games, so it stops within one
+ *  request interval and keeps everything already collected. */
+export function pauseSweep(id: number) {
+  return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/pause`, {});
+}
+
+export function resumeSweep(id: number) {
+  return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/resume`, {});
+}

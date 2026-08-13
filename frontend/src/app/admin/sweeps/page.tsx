@@ -5,18 +5,36 @@
  *  admin authentication, so this page is open to anyone who can reach it. */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Play, Square } from "lucide-react";
+import { Loader2, Pause, Play, Square } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { cancelSweep, fetchSweeps, startSweep } from "@/lib/api";
-import { fmtDate, fmtInt } from "@/lib/format";
+import {
+  cancelSweep,
+  fetchSweeps,
+  pauseSweep,
+  resumeSweep,
+  startSweep,
+} from "@/lib/api";
+import { fmtDateTime, fmtDuration, fmtInt } from "@/lib/format";
 import type { SweepKind, SweepOut } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-const ACTIVE = new Set(["queued", "running"]);
+const ACTIVE = new Set(["queued", "running", "paused"]);
+
+/** How long without a heartbeat before a job is treated as dead. A CLI sweep
+ *  checks in once per batch, and the follower batch is the slowest at ~400
+ *  games x 4s, so the threshold has to clear that with room to spare. */
+const STALE_AFTER_MS = 45 * 60 * 1000;
+
+function isStale(job: SweepOut): boolean {
+  if (!ACTIVE.has(job.status)) return false;
+  const last = job.heartbeat_at ?? job.started_at;
+  if (!last) return false;
+  return Date.now() - new Date(last).getTime() > STALE_AFTER_MS;
+}
 
 const SWEEPERS: {
   kind: SweepKind;
@@ -50,13 +68,71 @@ const SWEEPERS: {
 function statusTone(status: SweepOut["status"]): string {
   if (status === "done") return "border-good-text/40 text-good-text";
   if (status === "running" || status === "queued") return "border-accent/40 text-accent";
+  if (status === "paused") return "border-status-warn/40 text-status-warn";
   if (status === "failed") return "border-status-critical/40 text-status-critical";
   return "border-hairline text-muted";
 }
 
+/** When it started, how long it has been going, and how much longer.
+ *  Elapsed is measured from `started_at` and keeps ticking while paused —
+ *  wall-clock is what the operator is actually waiting on. */
+function Timing({ job }: { job: SweepOut }) {
+  const started = job.started_at ? new Date(job.started_at).getTime() : null;
+  const ended = job.finished_at ? new Date(job.finished_at).getTime() : Date.now();
+  const elapsed = started !== null ? (ended - started) / 1000 : null;
+  const live = ACTIVE.has(job.status);
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+      <span>
+        {job.started_at ? "Started " : "Queued "}
+        <span className="text-ink">
+          {fmtDateTime(job.started_at ?? job.created_at)}
+        </span>
+      </span>
+      {elapsed !== null ? (
+        <span>
+          {live ? "Running for" : "Took"}{" "}
+          <span className="tabular-nums text-ink">{fmtDuration(elapsed)}</span>
+        </span>
+      ) : null}
+      {live && job.eta_seconds !== null ? (
+        <span>
+          {job.status === "paused" ? "Remaining work" : "ETA"}{" "}
+          <span className="tabular-nums text-ink">{fmtDuration(job.eta_seconds)}</span>
+          {job.remaining !== null ? ` (${fmtInt(job.remaining)} games)` : ""}
+          {/* Say where the number came from: a measured rate is worth
+              trusting, a nominal one is arithmetic on the request interval. */}
+          {job.eta_basis === "estimated" ? " · assumed rate" : ""}
+          {job.eta_basis === "measured" ? " · measured rate" : ""}
+        </span>
+      ) : null}
+      {live && job.active_kind ? <span>Now: {job.active_kind}</span> : null}
+      {isStale(job) ? (
+        <span className="text-status-critical">
+          No heartbeat since {fmtDateTime(job.heartbeat_at ?? job.started_at)} — the
+          worker is probably gone. Stop it and run again.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** Collector summaries differ in shape, so render whatever counters came back
- *  rather than assuming a fixed set. */
-function ProgressLine({ kind, data }: { kind: string; data: Record<string, unknown> }) {
+ *  rather than assuming a fixed set.
+ *
+ *  `batch` matters: a CLI sweep runs as a series of 400-game containers, so
+ *  its counters describe the batch in flight, not the job. Rendering that as
+ *  a bare "50%" would claim the sweep is half done when it has hours to go. */
+function ProgressLine({
+  kind,
+  data,
+  batch,
+}: {
+  kind: string;
+  data: Record<string, unknown>;
+  batch: boolean;
+}) {
   const entries = Object.entries(data).filter(
     ([key, value]) =>
       key !== "done" && key !== "notes" && (typeof value === "number" || typeof value === "string"),
@@ -70,6 +146,7 @@ function ProgressLine({ kind, data }: { kind: string; data: Record<string, unkno
         <span className="font-medium">{kind}</span>
         {pct !== null ? (
           <span className="tabular-nums text-muted">
+            {batch ? "current batch " : ""}
             {fmtInt(processed)} / {fmtInt(total)} ({pct}%)
           </span>
         ) : null}
@@ -82,7 +159,10 @@ function ProgressLine({ kind, data }: { kind: string; data: Record<string, unkno
       ) : null}
       <div className="flex flex-wrap gap-x-3 text-[11px] text-muted">
         {entries
-          .filter(([key]) => key !== "total" && key !== "processed")
+          .filter(
+            ([key]) =>
+              key !== "total" && key !== "processed" && key !== "include_released",
+          )
           .map(([key, value]) => (
             <span key={key} className="tabular-nums">
               {key}: {String(value)}
@@ -123,6 +203,12 @@ export default function SweepsAdminPage() {
 
   const stop = useMutation({
     mutationFn: (id: number) => cancelSweep(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] }),
+  });
+
+  const hold = useMutation({
+    mutationFn: ({ id, paused }: { id: number; paused: boolean }) =>
+      paused ? resumeSweep(id) : pauseSweep(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] }),
   });
 
@@ -266,25 +352,53 @@ export default function SweepsAdminPage() {
                 {job.limit_per_kind ? (
                   <span className="text-xs text-muted">max {job.limit_per_kind}</span>
                 ) : null}
-                <span className="ml-auto text-xs text-muted">
-                  {fmtDate(job.created_at)}
-                </span>
+                <span className="ml-auto" />
                 {ACTIVE.has(job.status) ? (
-                  <Button
-                    onClick={() => stop.mutate(job.id)}
-                    disabled={job.cancel_requested || stop.isPending}
-                    className="h-7 gap-1.5 px-2 text-xs"
-                  >
-                    <Square size={11} aria-hidden />
-                    {job.cancel_requested ? "Stopping…" : "Stop"}
-                  </Button>
+                  <>
+                    <Button
+                      onClick={() => hold.mutate({ id: job.id, paused: job.paused })}
+                      disabled={job.cancel_requested || hold.isPending}
+                      className="h-7 gap-1.5 px-2 text-xs"
+                    >
+                      {job.paused ? (
+                        <Play size={11} aria-hidden />
+                      ) : (
+                        <Pause size={11} aria-hidden />
+                      )}
+                      {/* The flag and the status disagree until the worker
+                          notices, so the label reports which of the two it is
+                          rather than pretending the click took effect. */}
+                      {job.paused
+                        ? job.status === "paused"
+                          ? "Continue"
+                          : "Pausing…"
+                        : job.status === "paused"
+                          ? "Continuing…"
+                          : "Pause"}
+                    </Button>
+                    <Button
+                      onClick={() => stop.mutate(job.id)}
+                      disabled={job.cancel_requested || stop.isPending}
+                      className="h-7 gap-1.5 px-2 text-xs"
+                    >
+                      <Square size={11} aria-hidden />
+                      {job.cancel_requested ? "Stopping…" : "Stop"}
+                    </Button>
+                  </>
                 ) : null}
               </div>
+
+              <Timing job={job} />
 
               {Object.keys(job.progress).length > 0 ? (
                 <div className="mt-2 flex flex-col gap-2">
                   {Object.entries(job.progress).map(([kind, payload]) => (
-                    <ProgressLine key={kind} kind={kind} data={payload} />
+                    <ProgressLine
+                      key={kind}
+                      kind={kind}
+                      data={payload}
+                      batch={job.runner === "cli"}
+                    />
                   ))}
                 </div>
               ) : ACTIVE.has(job.status) ? (
@@ -295,6 +409,17 @@ export default function SweepsAdminPage() {
 
               {job.error ? (
                 <p className="mt-2 text-xs text-status-critical">{job.error}</p>
+              ) : null}
+              {job.status === "paused" ? (
+                <p className="mt-2 text-xs text-muted">
+                  Holding position between games. Everything collected so far is
+                  saved — Continue picks up where it stopped.
+                </p>
+              ) : null}
+              {job.paused && job.status === "running" ? (
+                <p className="mt-2 text-xs text-muted">
+                  Pause requested — the worker parks after the game it is on.
+                </p>
               ) : null}
               {job.status === "interrupted" ? (
                 <p className="mt-2 text-xs text-muted">

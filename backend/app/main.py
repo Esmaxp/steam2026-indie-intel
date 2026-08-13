@@ -15,6 +15,22 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    # A restart kills any sweep this process was running, leaving its row
+    # claiming to be live forever. Reconcile on the way in — migration 0014
+    # did this once, but a restart happens every deploy.
+    #
+    # Only in-process runs are cleared. A CLI sweep is a separate process that
+    # survives a backend restart; judging it dead here would strand a healthy
+    # multi-hour job. Its liveness is judged by heartbeat instead.
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE sweep_jobs SET status='interrupted', paused=false, "
+                "active_kind=null, finished_at=now() "
+                "WHERE status in ('queued','running','paused') "
+                "AND (runner IS NULL OR runner = 'api')"
+            )
+        )
     yield
     await engine.dispose()
 

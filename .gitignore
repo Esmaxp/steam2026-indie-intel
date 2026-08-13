@@ -36,3 +36,6 @@ promt.txt
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Playwright MCP scratch output (snapshots, console logs)
+.playwright-mcp/

@@ -48,6 +48,35 @@ export function fmtDate(iso: string | null | undefined, raw?: string | null): st
   });
 }
 
+/** Date plus clock time, for events where the hour matters — when a sweep
+ *  started, when it last checked in. */
+export function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return DASH;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return DASH;
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** A span in seconds as coarse human units ("2h 40m", "45s").
+ *  Deliberately imprecise above a minute: a multi-hour sweep's ETA is an
+ *  estimate, and showing seconds on it would imply otherwise. */
+export function fmtDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || seconds < 0) return DASH;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours < 24) return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
 export function fmtCompact(value: number | null | undefined): string {
   if (value === null || value === undefined) return DASH;
   return new Intl.NumberFormat("en-US", {

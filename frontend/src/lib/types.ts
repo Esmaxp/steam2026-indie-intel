@@ -311,14 +311,38 @@ export interface SweepOut {
   release_from: string | null;
   release_to: string | null;
   limit_per_kind: number | null;
-  status: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted";
+  status:
+    | "queued"
+    | "running"
+    | "paused"
+    | "done"
+    | "failed"
+    | "cancelled"
+    | "interrupted";
   cancel_requested: boolean;
+  paused: boolean;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  /** Last sign of life from the executing process. A CLI-driven sweep runs
+   *  outside the API, so a stale heartbeat is the only way to notice its shell
+   *  loop was killed. */
+  heartbeat_at: string | null;
+  /** Which collector is running right now, when a job has several. */
+  active_kind: SweepKind | null;
+  /** "api" — started from this page and run inside the backend; "cli" — run
+   *  by a sweep script on the host, which survives a backend restart. */
+  runner: "api" | "cli" | null;
   /** Per-kind counters, shape depends on the collector. */
   progress: Record<string, Record<string, number | string | boolean>>;
   error: string | null;
+  /** Games left for `active_kind`, counted from the database rather than from
+   *  the current batch's counters. */
+  remaining: number | null;
+  eta_seconds: number | null;
+  /** "measured" from real throughput, or "estimated" from the configured
+   *  request interval. Shown so the ETA does not imply precision it lacks. */
+  eta_basis: "measured" | "estimated" | "unknown" | null;
 }
 
 export interface SweepRequestBody {

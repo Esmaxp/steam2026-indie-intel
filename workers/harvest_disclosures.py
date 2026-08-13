@@ -174,6 +174,10 @@ async def run(
                 if on_progress is not None:
                     await on_progress({
                         "total": len(appids), "processed": index,
+                        # The walk position in the catalogue. `processed`
+                        # counts only within this batch, so a CLI-driven sweep
+                        # needs the appid to know how far it has really got.
+                        "appid": appid,
                         "found": len(found),
                         "games_with_disclosures": len({d.appid for d in found}),
                         "failed": failed,
@@ -215,13 +219,29 @@ def main() -> None:
         action="store_true",
         help="insert CONFIRMED rows; without it, a CSV is written for review",
     )
+    parser.add_argument(
+        "--job-id",
+        type=int,
+        default=None,
+        help="attach to a sweep_jobs row so the admin UI can show progress "
+             "and pause/stop this run",
+    )
     args = parser.parse_args()
+
+    on_progress = should_stop = None
+    if args.job_id is not None:
+        from scraper.common.job_control import make_controls
+
+        on_progress, should_stop = make_controls(args.job_id, "disclosures")
+
     asyncio.run(
         run(
             limit=args.limit,
             start_appid=args.start_appid,
             only_appid=args.appid,
             write=args.write,
+            on_progress=on_progress,
+            should_stop=should_stop,
         )
     )
 
