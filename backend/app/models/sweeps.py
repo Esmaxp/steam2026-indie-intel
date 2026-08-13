@@ -43,6 +43,9 @@ class SweepJob(Base):
     # the backend, so this is the only way to tell a live job from one whose
     # shell loop was killed.
     heartbeat_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Paused SINCE. Cleared on resume and on finish, so it never lingers as
+    # "was paused once" on a row that is running or done.
+    paused_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     active_kind: Mapped[str | None] = mapped_column(Text)
     # Which process owns this row: "api" (in the backend) or "cli" (a sweep
     # script). The backend clears only its own on startup.

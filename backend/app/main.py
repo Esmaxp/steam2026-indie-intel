@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(
             text(
                 "UPDATE sweep_jobs SET status='interrupted', paused=false, "
-                "active_kind=null, finished_at=now() "
+                "paused_at=null, active_kind=null, finished_at=now() "
                 "WHERE status in ('queued','running','paused') "
                 "AND (runner IS NULL OR runner = 'api')"
             )

@@ -112,6 +112,11 @@ function Timing({ job }: { job: SweepOut }) {
           {job.eta_basis === "measured" ? " · measured rate" : ""}
         </span>
       ) : null}
+      {job.paused_at ? (
+        <span>
+          Paused <span className="text-ink">{fmtDateTime(job.paused_at)}</span>
+        </span>
+      ) : null}
       {live && job.active_kind ? <span>Now: {job.active_kind}</span> : null}
       {isStale(job) ? (
         <span className="text-status-critical">

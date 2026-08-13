@@ -209,7 +209,7 @@ async def _execute(job_id: int) -> None:
             logger.exception("sweep %s failed", job_id)
             await _set(
                 job_id, status="failed", error=f"{exc.__class__.__name__}: {exc}"[:2000],
-                paused=False, active_kind=None,
+                paused=False, paused_at=None, active_kind=None,
                 finished_at=datetime.datetime.now(datetime.timezone.utc),
             )
             return
@@ -221,6 +221,7 @@ async def _execute(job_id: int) -> None:
             # Clear the hold, so a paused-then-cancelled job does not come back
             # looking pausable in the UI.
             paused=False,
+            paused_at=None,
             active_kind=None,
             finished_at=datetime.datetime.now(datetime.timezone.utc),
         )

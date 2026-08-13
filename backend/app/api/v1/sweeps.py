@@ -22,6 +22,38 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 MAX_LISTED = 20
 
 
+def _listing_order():
+    """Live work first, then held work, then history.
+
+    Ordered in SQL rather than in the client because MAX_LISTED truncates: a
+    running sweep older than twenty newer rows would otherwise be dropped from
+    the list entirely.
+
+    The keys after the tier only bite within their own tier, which is what
+    lets one ORDER BY express three different sorts:
+
+      running/queued — every other key is null, so it falls through to the
+                       start time
+      paused/interrupted — paused rows have a pause time and sort first;
+                       interrupted rows have none and fall through to when
+                       they were interrupted, which is their finish time
+      everything else — no pause time, so it falls through to finish time
+    """
+    tier = sa.case(
+        (SweepJob.status.in_(("queued", "running")), 0),
+        (SweepJob.status.in_(("paused", "interrupted")), 1),
+        else_=2,
+    )
+    return (
+        tier,
+        SweepJob.paused_at.desc().nullslast(),
+        SweepJob.finished_at.desc().nullslast(),
+        # Queued rows have not started, so fall back to when they were asked
+        # for rather than sorting them last on a null.
+        sa.func.coalesce(SweepJob.started_at, SweepJob.created_at).desc(),
+    )
+
+
 class SweepRequest(BaseModel):
     kinds: list[str] = Field(..., min_length=1)
     # Release-date window: which GAMES to scan. Omit both for the whole
@@ -58,6 +90,8 @@ class SweepOut(BaseModel):
     # outside this API, so a stale heartbeat is the only way to tell that its
     # shell loop was killed.
     heartbeat_at: datetime.datetime | None = None
+    # Paused since. Null unless the run is holding position right now.
+    paused_at: datetime.datetime | None = None
     active_kind: str | None = None
     # "api" (run inside the backend) or "cli" (run by a sweep script).
     runner: str | None = None
@@ -86,6 +120,7 @@ def _out(job: SweepJob, eta: dict | None = None) -> SweepOut:
         status=job.status, cancel_requested=job.cancel_requested,
         paused=job.paused, created_at=job.created_at, started_at=job.started_at,
         finished_at=job.finished_at, heartbeat_at=job.heartbeat_at,
+        paused_at=job.paused_at,
         active_kind=job.active_kind, runner=job.runner,
         start_appid=job.start_appid,
         progress=job.progress or {}, error=job.error,
@@ -164,7 +199,7 @@ async def start_sweep(body: SweepRequest, db: AsyncSession = Depends(get_db)) ->
 async def list_sweeps(db: AsyncSession = Depends(get_db)) -> list[SweepOut]:
     rows = (
         await db.execute(
-            sa.select(SweepJob).order_by(SweepJob.created_at.desc()).limit(MAX_LISTED)
+            sa.select(SweepJob).order_by(*_listing_order()).limit(MAX_LISTED)
         )
     ).scalars().all()
     out = []
@@ -237,6 +272,10 @@ async def _set_flag(job_id: int, db: AsyncSession, *, paused: bool) -> SweepOut:
     if job.status in ("done", "failed", "cancelled", "interrupted"):
         raise HTTPException(status_code=409, detail=f"Sweep is already {job.status}")
     job.paused = paused
+    # Stamped on request, not on the worker's confirmation: the operator's
+    # question is "which did I pause last", and the worker can take up to a
+    # request interval to notice.
+    job.paused_at = datetime.datetime.now(datetime.timezone.utc) if paused else None
     await db.commit()
     await db.refresh(job)
     return _out(job)

@@ -328,6 +328,8 @@ export interface SweepOut {
    *  outside the API, so a stale heartbeat is the only way to notice its shell
    *  loop was killed. */
   heartbeat_at: string | null;
+  /** Paused since. Null unless the run is holding position right now. */
+  paused_at: string | null;
   /** Which collector is running right now, when a job has several. */
   active_kind: SweepKind | null;
   /** "api" — started from this page and run inside the backend; "cli" — run
