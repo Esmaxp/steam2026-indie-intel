@@ -31,6 +31,7 @@ import {
 } from "@/lib/format";
 import type { GameListItem } from "@/lib/types";
 import { useFilterParams } from "@/hooks/use-filter-params";
+import { rememberListQuery } from "@/lib/last-list-query";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -544,6 +545,12 @@ export function GamesTable() {
     setColumnVisibility(DEFAULT_COLUMN_VISIBILITY);
     window.localStorage.removeItem(VISIBILITY_STORAGE_KEY);
   };
+
+  // Stash the filters on every change, so leaving for a game and coming back
+  // through "All games" lands on this list rather than the whole catalogue.
+  useEffect(() => {
+    rememberListQuery(searchParams.toString());
+  }, [searchParams]);
 
   const apiParams = useMemo(() => {
     const params = new URLSearchParams(searchParams.toString());

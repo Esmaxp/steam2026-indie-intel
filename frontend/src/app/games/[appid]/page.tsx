@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { use } from "react";
+import { use, useEffect, useState } from "react";
 import { fetchGame } from "@/lib/api";
 import {
   DASH,
@@ -17,6 +17,7 @@ import {
   fmtWishlist,
   labelFor,
 } from "@/lib/format";
+import { listHref } from "@/lib/last-list-query";
 import type { GameDetail, Provenanced } from "@/lib/types";
 import { GameVideos } from "@/components/game-videos";
 import { SimilarGamesList } from "@/components/similar-games-search";
@@ -111,6 +112,12 @@ export default function GamePage({
   params: Promise<{ appid: string }>;
 }) {
   const { appid } = use(params);
+  // Resolved after mount, not during render: sessionStorage does not exist on
+  // the server, and reading it while rendering would make the markup differ
+  // from the server's. The link works as a plain "/" until then.
+  const [backHref, setBackHref] = useState("/");
+  useEffect(() => setBackHref(listHref()), []);
+
   const { data: game, isLoading, isError } = useQuery({
     queryKey: ["game", appid],
     queryFn: () => fetchGame(Number(appid)),
@@ -123,8 +130,8 @@ export default function GamePage({
     return (
       <Card className="p-10 text-center text-muted">
         Game not found.{" "}
-        <Link href="/" className="text-accent hover:underline">
-          Back to dashboard
+        <Link href={backHref} className="text-accent hover:underline">
+          {backHref === "/" ? "Back to dashboard" : "Back to results"}
         </Link>
       </Card>
     );
@@ -136,10 +143,11 @@ export default function GamePage({
   return (
     <div className="flex flex-col gap-4">
       <Link
-        href="/"
+        href={backHref}
         className="inline-flex w-fit items-center gap-1 text-sm text-ink2 hover:text-ink"
       >
-        <ArrowLeft size={14} aria-hidden /> All games
+        <ArrowLeft size={14} aria-hidden />{" "}
+        {backHref === "/" ? "All games" : "Back to results"}
       </Link>
 
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
