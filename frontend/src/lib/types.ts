@@ -333,6 +333,9 @@ export interface SweepOut {
   /** "api" — started from this page and run inside the backend; "cli" — run
    *  by a sweep script on the host, which survives a backend restart. */
   runner: "api" | "cli" | null;
+  /** Where a disclosures walk begins. Set when this run continues an earlier
+   *  one; null when it starts from the top. */
+  start_appid: number | null;
   /** Per-kind counters, shape depends on the collector. */
   progress: Record<string, Record<string, number | string | boolean>>;
   error: string | null;

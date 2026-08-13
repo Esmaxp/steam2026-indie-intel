@@ -141,3 +141,9 @@ export function pauseSweep(id: number) {
 export function resumeSweep(id: number) {
   return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/resume`, {});
 }
+
+/** Continue a run that stopped early, as a new job with the same settings.
+ *  Not the same as resumeSweep, which un-pauses a live one. */
+export function rerunSweep(id: number) {
+  return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/rerun`, {});
+}

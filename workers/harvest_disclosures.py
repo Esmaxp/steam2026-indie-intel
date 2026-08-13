@@ -151,9 +151,16 @@ async def run(
     found: list[Disclosure] = []
     failed = 0
     stopped = False
+    # Walk position, so a run that ends early can be continued. Nothing else
+    # records it: this collector writes rows only for the ~5% of games that
+    # announced a figure, so the other 95% leave no trace of being read.
+    last_appid = 0
+    visited = 0
     async with make_session() as http:
         client = SteamClient(http, min_interval=MIN_INTERVAL)
         for index, appid in enumerate(appids, start=1):
+            last_appid = appid
+            visited = index
             try:
                 items = await fetch_news_items(client, appid)
             except Exception as exc:  # noqa: BLE001 — one bad game must not end the run
@@ -188,7 +195,13 @@ async def run(
                 break
 
     summary = {
+        # Games SELECTED for this run. The sweep script compares it against
+        # the batch size to detect the end of the catalogue, so it must stay
+        # the selected count even when the run stops early.
         "scanned": len(appids),
+        # Games actually read, and where the walk got to.
+        "processed": visited,
+        "appid": last_appid,
         "games_with_disclosures": len({d.appid for d in found}),
         "disclosures": len(found),
         "failed": failed,

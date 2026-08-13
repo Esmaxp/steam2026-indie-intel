@@ -62,13 +62,19 @@ async def read_flags(job_id: int) -> tuple[bool, bool]:
 
 
 async def report(job_id: int, kind: str, payload: dict) -> None:
-    """Merge one collector's counters into the job and stamp the heartbeat."""
+    """Merge one collector's counters into the job and stamp the heartbeat.
+
+    Merged into the kind's existing payload, not written over it. Live
+    counters and the end-of-run summary do not carry the same keys, and a
+    summary that replaced the counters would discard the walk position a
+    disclosures run needs in order to be continued.
+    """
     async with async_session_factory() as db:
         job = await db.get(SweepJob, job_id)
         if job is None:
             return
         progress = dict(job.progress or {})
-        progress[kind] = payload
+        progress[kind] = {**(progress.get(kind) or {}), **payload}
         job.progress = progress
         job.active_kind = kind
         job.heartbeat_at = datetime.datetime.now(datetime.timezone.utc)

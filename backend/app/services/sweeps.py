@@ -27,7 +27,7 @@ import logging
 import sqlalchemy as sa
 
 from app.db.session import async_session_factory
-from app.models import SweepJob
+from app.models import Game, SweepJob
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,54 @@ async def _set(job_id: int, **values) -> None:
     async with async_session_factory() as db:
         await db.execute(sa.update(SweepJob).where(SweepJob.id == job_id).values(**values))
         await db.commit()
+
+
+def walk_position(progress: dict, runner: str | None) -> tuple[str, int] | None:
+    """How far a disclosures run got: ("appid", n) or ("scanned", n).
+
+    Runs since the walk position was recorded report the appid directly. Older
+    rows recorded only how many games they scanned, which still locates the
+    position because the walk is appid-ordered — but only for a run that
+    scanned in one pass. A CLI run reports `processed` per batch, so its count
+    means nothing globally and is refused rather than guessed at.
+    """
+    appid = progress.get("appid")
+    if appid:
+        return ("appid", int(appid))
+    if runner == "cli":
+        return None
+    processed = int(progress.get("processed") or 0)
+    return ("scanned", processed) if processed > 0 else None
+
+
+async def resume_anchor(db, job: SweepJob) -> int | None:
+    """Where a re-run of `job` should pick up. None = start from the top.
+
+    Only disclosures needs one. The follower collector resumes for free —
+    select_stale() skips anything already fresh — and the rank sweep is a few
+    minutes end to end.
+    """
+    if "disclosures" not in job.kinds:
+        return None
+    position = walk_position((job.progress or {}).get("disclosures") or {}, job.runner)
+    if position is None:
+        return None
+    basis, value = position
+    if basis == "appid":
+        return value + 1  # resume past the last game it read
+
+    # A count rather than an appid: find the game that many places into the
+    # walk, counting from wherever that run itself began.
+    scanned = value
+    start = job.start_appid or 0
+    last = await db.scalar(
+        sa.select(Game.appid)
+        .where(Game.appid >= start)
+        .order_by(Game.appid)
+        .offset(scanned - 1)
+        .limit(1)
+    )
+    return (last + 1) if last is not None else None
 
 
 async def _cancel_requested(job_id: int) -> bool:
@@ -83,7 +131,7 @@ async def _run_kind(job: SweepJob, kind: str) -> dict:
 
         return await run_disclosures(
             limit=job.limit_per_kind or 0,
-            start_appid=0,
+            start_appid=job.start_appid or 0,
             only_appid=None,
             write=True,
             release_from=job.release_from,
@@ -115,6 +163,7 @@ async def _execute(job_id: int) -> None:
             snapshot = SweepJob(
                 id=job.id, kinds=kinds, release_from=job.release_from,
                 release_to=job.release_to, limit_per_kind=job.limit_per_kind,
+                start_appid=job.start_appid,
             )
         await _set(job_id, status="running", started_at=datetime.datetime.now(datetime.timezone.utc))
 

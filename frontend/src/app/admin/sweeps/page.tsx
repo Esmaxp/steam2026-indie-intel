@@ -5,13 +5,14 @@
  *  admin authentication, so this page is open to anyone who can reach it. */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Pause, Play, Square } from "lucide-react";
+import { Loader2, Pause, Play, RotateCw, Square } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import {
   cancelSweep,
   fetchSweeps,
   pauseSweep,
+  rerunSweep,
   resumeSweep,
   startSweep,
 } from "@/lib/api";
@@ -23,6 +24,10 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 const ACTIVE = new Set(["queued", "running", "paused"]);
+/** Finished one way or another. Every collector is resumable, so all four are
+ *  worth continuing — a completed sweep re-run picks up whatever has gone
+ *  stale since. */
+const TERMINAL = new Set(["done", "failed", "cancelled", "interrupted"]);
 
 /** How long without a heartbeat before a job is treated as dead. A CLI sweep
  *  checks in once per batch, and the follower batch is the slowest at ~400
@@ -212,6 +217,11 @@ export default function SweepsAdminPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] }),
   });
 
+  const rerun = useMutation({
+    mutationFn: (id: number) => rerunSweep(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] }),
+  });
+
   const running = (data ?? []).find((job) => ACTIVE.has(job.status));
   const datesApply = [...kinds].some(
     (k) => SWEEPERS.find((s) => s.kind === k)?.respectsDates,
@@ -385,6 +395,17 @@ export default function SweepsAdminPage() {
                       {job.cancel_requested ? "Stopping…" : "Stop"}
                     </Button>
                   </>
+                ) : TERMINAL.has(job.status) ? (
+                  <Button
+                    onClick={() => rerun.mutate(job.id)}
+                    // Same one-at-a-time rule as the Run button: a second
+                    // sweep would double the request rate against Steam.
+                    disabled={rerun.isPending || running !== undefined}
+                    className="h-7 gap-1.5 px-2 text-xs"
+                  >
+                    <RotateCw size={11} aria-hidden />
+                    {job.status === "done" ? "Run again" : "Continue"}
+                  </Button>
                 ) : null}
               </div>
 
@@ -424,7 +445,18 @@ export default function SweepsAdminPage() {
               {job.status === "interrupted" ? (
                 <p className="mt-2 text-xs text-muted">
                   The backend restarted mid-run. Whatever was collected is saved —
-                  run it again to continue.
+                  Continue starts a new run from where this one stopped.
+                </p>
+              ) : null}
+              {job.start_appid ? (
+                <p className="mt-2 text-xs text-muted">
+                  Continuing an earlier run — skips ahead to appid{" "}
+                  {fmtInt(job.start_appid)}.
+                </p>
+              ) : null}
+              {rerun.isError ? (
+                <p className="mt-2 text-xs text-status-critical">
+                  {(rerun.error as Error).message}
                 </p>
               ) : null}
             </div>

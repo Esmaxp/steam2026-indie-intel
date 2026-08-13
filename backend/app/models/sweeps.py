@@ -47,6 +47,9 @@ class SweepJob(Base):
     # Which process owns this row: "api" (in the backend) or "cli" (a sweep
     # script). The backend clears only its own on startup.
     runner: Mapped[str | None] = mapped_column(Text)
+    # Where a disclosures walk begins. NULL = from the start; set when a run
+    # continues an earlier one, which is the only way that collector resumes.
+    start_appid: Mapped[int | None] = mapped_column(Integer)
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

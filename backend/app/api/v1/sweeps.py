@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.videos import require_admin
 from app.db.session import get_db
-from app.models import SWEEP_KINDS, SweepJob
+from app.models import SWEEP_KINDS, TERMINAL_STATUSES, SweepJob
 from app.services import sweep_eta, sweeps
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -61,6 +61,9 @@ class SweepOut(BaseModel):
     active_kind: str | None = None
     # "api" (run inside the backend) or "cli" (run by a sweep script).
     runner: str | None = None
+    # Where a disclosures walk begins. Set when this run continues an earlier
+    # one; null for a run that starts from the top.
+    start_appid: int | None = None
     progress: dict = {}
     error: str | None = None
     # Work left and how long it should take. `eta_basis` says whether the
@@ -80,19 +83,18 @@ def _out(job: SweepJob, eta: dict | None = None) -> SweepOut:
         paused=job.paused, created_at=job.created_at, started_at=job.started_at,
         finished_at=job.finished_at, heartbeat_at=job.heartbeat_at,
         active_kind=job.active_kind, runner=job.runner,
+        start_appid=job.start_appid,
         progress=job.progress or {}, error=job.error,
         remaining=eta.get("remaining"), eta_seconds=eta.get("eta_seconds"),
         eta_basis=eta.get("basis"),
     )
 
 
-@router.post("/sweeps", response_model=SweepOut, status_code=202)
-async def start_sweep(body: SweepRequest, db: AsyncSession = Depends(get_db)) -> SweepOut:
-    """Queue a run and return immediately — these take minutes to hours."""
-    # One at a time on purpose: concurrent sweeps multiply the request rate
-    # against Steam, which is the failure this project already hit. The check
-    # is against the sweep_jobs table, not just this process — a CLI sweep
-    # hits Steam exactly as hard, and is_running() cannot see it.
+async def _refuse_if_one_is_live(db: AsyncSession) -> None:
+    """One at a time on purpose: concurrent sweeps multiply the request rate
+    against Steam, which is the failure this project already hit. The check is
+    against the sweep_jobs table, not just this process — a CLI sweep hits
+    Steam exactly as hard, and is_running() cannot see it."""
     live = await db.scalar(
         sa.select(SweepJob.id)
         .where(SweepJob.status.in_(("queued", "running", "paused")))
@@ -107,6 +109,12 @@ async def start_sweep(body: SweepRequest, db: AsyncSession = Depends(get_db)) ->
                 else "A sweep is already running. Wait for it, or stop it first."
             ),
         )
+
+
+@router.post("/sweeps", response_model=SweepOut, status_code=202)
+async def start_sweep(body: SweepRequest, db: AsyncSession = Depends(get_db)) -> SweepOut:
+    """Queue a run and return immediately — these take minutes to hours."""
+    await _refuse_if_one_is_live(db)
     if (
         body.release_from is not None
         and body.release_to is not None
@@ -148,6 +156,44 @@ async def list_sweeps(db: AsyncSession = Depends(get_db)) -> list[SweepOut]:
         )
         out.append(_out(job, eta))
     return out
+
+
+@router.post("/sweeps/{job_id}/rerun", response_model=SweepOut, status_code=202)
+async def rerun_sweep(job_id: int, db: AsyncSession = Depends(get_db)) -> SweepOut:
+    """Continue a run that stopped early, as a new job.
+
+    A new row rather than a revival of the old one: the original is a record of
+    what happened, and overwriting its timing and counters would erase that.
+
+    Every collector is resumable, but not in the same way. Followers and rank
+    work out where to start from the database; disclosures cannot — it leaves
+    no trace for the 95% of games that announced nothing — so its walk position
+    is carried across explicitly.
+    """
+    source = await db.get(SweepJob, job_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+    if source.status not in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sweep {job_id} is {source.status} — stop it before re-running.",
+        )
+    await _refuse_if_one_is_live(db)
+
+    job = SweepJob(
+        kinds=list(source.kinds),
+        release_from=source.release_from,
+        release_to=source.release_to,
+        limit_per_kind=source.limit_per_kind,
+        start_appid=await sweeps.resume_anchor(db, source),
+        runner="api",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    sweeps.launch(job.id)
+    return _out(job)
 
 
 @router.post("/sweeps/{job_id}/pause", response_model=SweepOut)

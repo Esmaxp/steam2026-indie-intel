@@ -191,8 +191,16 @@ left. The ETA is labelled **measured** when it comes from observed throughput
 and **assumed rate** when it is arithmetic on the configured request interval —
 a full-catalogue follower sweep is ~18h at 4s per game, disclosures ~8h at
 1.5s. **Pause** holds position between games and keeps everything collected;
-**Continue** picks up where it stopped; **Stop** ends the run. Every collector
-is resumable, so none of the three loses work.
+**Continue** resumes it; **Stop** ends the run. Every collector is resumable,
+so none of the three loses work.
+
+A run that finished, failed, was stopped, or died with the backend gets a
+**Continue** button too, which starts a new job with the same settings from
+where the old one stopped. The original row is kept as the record of what
+happened rather than being revived. Followers and rank work out where to
+resume from the database; disclosures cannot — it writes rows only for the
+~5% of games that announced a figure, so "already scanned" leaves no trace for
+the other 95% — and its walk position is carried across explicitly.
 
 The same controls reach the long CLI sweeps, which are the practical way to run
 a full catalogue pass because they survive a backend restart:

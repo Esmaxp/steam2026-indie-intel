@@ -75,8 +75,10 @@ def test_hit_ratio_converts_writes_to_visits():
     assert _hit_ratio({"processed": 100, "written": 76}) == 0.76
 
 
-def test_hit_ratio_falls_back_before_the_run_has_evidence():
-    """Not 1.0: assuming every game has a hub makes the sweep look slower than
-    it is, and the fallback should not be the pessimistic end of the range."""
-    assert _hit_ratio({}) == 0.75
-    assert _hit_ratio({"processed": 3, "written": 3}) == 0.75
+def test_hit_ratio_is_unknown_before_the_run_has_evidence():
+    """Not a guessed constant. The ratio converts a write rate into a visit
+    rate, so a wrong assumption lands straight in the ETA — assuming 0.75
+    against a real 0.97 reported 13.5h on an 18h sweep. Unknown means the
+    caller quotes the nominal interval instead of a false measurement."""
+    assert _hit_ratio({}) is None
+    assert _hit_ratio({"processed": 3, "written": 3}) is None

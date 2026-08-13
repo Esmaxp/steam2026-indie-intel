@@ -31,6 +31,12 @@ NOMINAL_INTERVAL = {"followers": 4.0, "disclosures": 1.5, "rank": 3.0}
 RATE_WINDOW_MINUTES = 25
 # Fewer gaps than this and a median is not a median.
 MIN_RATE_BATCHES = 4
+# Games a run must have visited before its hub-hit ratio means anything. The
+# ratio divides the rate, so sampling noise lands in the ETA amplified: 44/50
+# instead of the true ~0.95 is enough to shave an hour off an 18h estimate.
+# ~7 minutes into a follower sweep, which is exactly the period where the
+# nominal interval is a perfectly good answer anyway.
+MIN_HIT_RATIO_SAMPLES = 100
 # Matches refresh_followers' default staleness cutoff.
 FOLLOWER_MIN_AGE_HOURS = 20
 UNKNOWN = {"remaining": None, "eta_seconds": None, "basis": "unknown"}
@@ -101,14 +107,18 @@ def rate_from_batches(batches: list[tuple[datetime.datetime, int]]) -> float | N
     return statistics.median(rates)
 
 
-async def _observed_follower_rate(db: AsyncSession, hit_ratio: float) -> float | None:
+async def _observed_follower_rate(
+    db: AsyncSession, hit_ratio: float | None
+) -> float | None:
     """Games visited per second, measured, or None if there is too little to
     measure from.
 
     Divided by the hit ratio because a game with no community hub writes
     nothing: snapshots-per-second is a visit rate only for the games that have
-    a hub.
+    a hub. Without that ratio there is no honest conversion, so no measurement.
     """
+    if not hit_ratio or hit_ratio <= 0:
+        return None
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
         minutes=RATE_WINDOW_MINUTES
     )
@@ -124,19 +134,24 @@ async def _observed_follower_rate(db: AsyncSession, hit_ratio: float) -> float |
         ).all()
     ]
     rate = rate_from_batches(batches)
-    if rate is None or hit_ratio <= 0:
-        return None
-    return rate / hit_ratio
+    return None if rate is None else rate / hit_ratio
 
 
-def _hit_ratio(progress: dict) -> float:
+def _hit_ratio(progress: dict) -> float | None:
     """Fraction of visited games that produced a snapshot, from this run's own
-    counters. Falls back to a plausible share rather than 1.0, because
-    assuming every game has a hub makes the sweep look slower than it is."""
+    counters — or None when the run has not said yet.
+
+    Deliberately not a guessed constant. The ratio is what converts a write
+    rate into a visit rate, and it varies with the slice of the catalogue
+    being swept; a wrong assumption lands directly in the ETA. An early
+    version assumed 0.75 against a real ratio of ~0.97 and reported 13.5h on
+    an 18h sweep. Better to quote the nominal interval for the first minute or
+    two and switch to a measured rate once the run has evidence.
+    """
     processed = int(progress.get("processed") or 0)
     written = int(progress.get("written") or 0)
-    if processed < 10 or written == 0:
-        return 0.75
+    if processed < MIN_HIT_RATIO_SAMPLES or written == 0:
+        return None
     return written / processed
 
 
