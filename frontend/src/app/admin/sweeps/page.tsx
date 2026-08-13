@@ -36,6 +36,14 @@ const TERMINAL = new Set(["done", "failed", "cancelled", "interrupted"]);
  *  games x 4s, so the threshold has to clear that with room to spare. */
 const STALE_AFTER_MS = 45 * 60 * 1000;
 
+/** Progress keys that feed the ETA rather than describing the work. */
+const HIDDEN_COUNTERS = new Set([
+  "total",
+  "processed",
+  "elapsed",
+  "include_released",
+]);
+
 function isStale(job: SweepOut): boolean {
   if (!ACTIVE.has(job.status)) return false;
   const last = job.heartbeat_at ?? job.started_at;
@@ -103,6 +111,29 @@ function statusTone(status: SweepOut["status"]): string {
 /** When it started, how long it has been going, and how much longer.
  *  Elapsed is measured from `started_at` and keeps ticking while paused —
  *  wall-clock is what the operator is actually waiting on. */
+/** Which games the run covers, in words, and ALWAYS shown.
+ *
+ *  Rendering it only when a window was set meant the common case — the whole
+ *  catalogue — displayed nothing at all, so a card gave no way to tell a
+ *  full sweep from a narrow one without opening the database.
+ *
+ *  The rank sweep is called out rather than shown with a window it did not
+ *  obey: the range is stored on the row because the operator submitted it, but
+ *  that collector reads one global chart Valve orders itself. Printing
+ *  "games released 1 Jan → 31 Dec" beside it would describe a filter that
+ *  never ran. */
+function scopeLabel(job: SweepOut): string {
+  if (job.kinds.every((kind) => kind === "rank")) {
+    return "Valve's Top-Wishlists chart — release dates do not apply";
+  }
+  const from = job.release_from ? fmtDate(job.release_from) : null;
+  const to = job.release_to ? fmtDate(job.release_to) : null;
+  if (from && to) return `games released ${from} → ${to}`;
+  if (from) return `games released from ${from}`;
+  if (to) return `games released up to ${to}`;
+  return "whole catalogue, any release date";
+}
+
 function Timing({ job }: { job: SweepOut }) {
   const started = job.started_at ? new Date(job.started_at).getTime() : null;
   const ended = job.finished_at ? new Date(job.finished_at).getTime() : Date.now();
@@ -130,6 +161,12 @@ function Timing({ job }: { job: SweepOut }) {
           <span className="tabular-nums text-ink">{fmtDuration(elapsed)}</span>
         </span>
       ) : null}
+      {/* Labelled "Covers", not left as a bare arrow range: two ranges on one
+          line, one of dates and one of times, are otherwise easy to confuse. */}
+      <span>
+        Covers <span className="text-ink">{scopeLabel(job)}</span>
+        {job.limit_per_kind ? `, max ${fmtInt(job.limit_per_kind)} games` : ""}
+      </span>
       {live && job.eta_seconds !== null ? (
         <span>
           {job.status === "paused" ? "Remaining work" : "ETA"}{" "}
@@ -225,10 +262,10 @@ function ProgressLine({
       ) : null}
       <div className="flex flex-wrap gap-x-3 text-[11px] text-muted">
         {entries
-          .filter(
-            ([key]) =>
-              key !== "total" && key !== "processed" && key !== "include_released",
-          )
+          // `elapsed` and `include_released` are inputs to the ETA, not
+          // counters worth reading — "elapsed: 1297.5" beside the review
+          // totals is noise.
+          .filter(([key]) => !HIDDEN_COUNTERS.has(key))
           .map(([key, value]) => (
             <span key={key} className="tabular-nums">
               {key}: {String(value)}
@@ -459,20 +496,7 @@ export default function SweepsAdminPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className={statusTone(job.status)}>{job.status}</Badge>
                 <span className="text-sm font-medium">{job.kinds.join(" + ")}</span>
-                {job.release_from || job.release_to ? (
-                  <span
-                    className="text-xs text-muted"
-                    title="Limits WHICH GAMES are scanned by their release date. Nothing to do with when the sweep ran."
-                  >
-                    {/* An ellipsis, not the usual DASH: a missing bound here
-                        means "no limit", not "unknown". */}
-                    games released {job.release_from ? fmtDate(job.release_from) : "…"}{" "}
-                    → {job.release_to ? fmtDate(job.release_to) : "…"}
-                  </span>
-                ) : null}
-                {job.limit_per_kind ? (
-                  <span className="text-xs text-muted">max {job.limit_per_kind}</span>
-                ) : null}
+
                 <span className="ml-auto" />
                 {ACTIVE.has(job.status) ? (
                   <>
