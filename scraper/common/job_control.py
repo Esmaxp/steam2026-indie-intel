@@ -26,12 +26,23 @@ logger = logging.getLogger(__name__)
 PAUSE_POLL_SECONDS = 2.0
 
 
-async def create_job(kinds: list[str], limit_per_kind: int | None = None) -> int:
-    """Register a CLI-driven run so it appears in the admin UI."""
+async def create_job(
+    kinds: list[str],
+    limit_per_kind: int | None = None,
+    start_appid: int | None = None,
+) -> int:
+    """Register a CLI-driven run so it appears in the admin UI.
+
+    start_appid is recorded rather than left to the worker alone, so the row
+    describes its own scope: the ETA can count remaining work from the first
+    second, instead of assuming the whole catalogue until the first batch
+    reports back.
+    """
     async with async_session_factory() as db:
         job = SweepJob(
             kinds=kinds,
             limit_per_kind=limit_per_kind,
+            start_appid=start_appid or None,
             status="running",
             # Owned by a separate process, so a backend restart must leave it
             # alone — it keeps running.
@@ -149,7 +160,7 @@ def _cli() -> None:
     is no long-lived Python process to own the row — it has to be created
     before the first batch and closed after the last one.
 
-        id=$(python -m scraper.common.job_control create followers)
+        id=$(python -m scraper.common.job_control create disclosures 3440281)
         python -m scraper.common.job_control finish "$id" done
     """
     import sys
@@ -157,7 +168,8 @@ def _cli() -> None:
     args = sys.argv[1:]
     if args and args[0] == "create":
         kinds = args[1].split(",") if len(args) > 1 else []
-        print(asyncio.run(create_job(kinds)))
+        start = int(args[2]) if len(args) > 2 and args[2].isdigit() else None
+        print(asyncio.run(create_job(kinds, start_appid=start)))
         return
     if args and args[0] == "finish":
         asyncio.run(finish(int(args[1]), args[2] if len(args) > 2 else "done"))

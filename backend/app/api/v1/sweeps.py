@@ -90,31 +90,48 @@ def _out(job: SweepJob, eta: dict | None = None) -> SweepOut:
     )
 
 
-async def _refuse_if_one_is_live(db: AsyncSession) -> None:
-    """One at a time on purpose: concurrent sweeps multiply the request rate
-    against Steam, which is the failure this project already hit. The check is
-    against the sweep_jobs table, not just this process — a CLI sweep hits
-    Steam exactly as hard, and is_running() cannot see it."""
-    live = await db.scalar(
-        sa.select(SweepJob.id)
-        .where(SweepJob.status.in_(("queued", "running", "paused")))
-        .limit(1)
-    )
-    if live is not None or sweeps.is_running():
+async def _refuse_if_kind_is_live(db: AsyncSession, kinds: list[str]) -> None:
+    """One sweep per collector, not one sweep overall.
+
+    Each collector talks to a different Steam host, so followers and
+    disclosures running together does not raise the request rate against
+    either. Two of the SAME kind does, and that is the failure this project
+    already hit when orphaned containers overlapped.
+
+    Checked against the sweep_jobs table rather than the in-process runner: a
+    CLI sweep hits Steam exactly as hard and runs in another process
+    altogether, so the table is the only thing the two paths share.
+    """
+    rows = (
+        await db.execute(
+            sa.select(SweepJob.id, SweepJob.kinds).where(
+                SweepJob.status.in_(("queued", "running", "paused"))
+            )
+        )
+    ).all()
+    wanted = set(kinds)
+    for job_id, live_kinds in rows:
+        clash = wanted & set(live_kinds)
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Sweep {job_id} is already running {', '.join(sorted(clash))}. "
+                    "Wait for it, or stop it first."
+                ),
+            )
+    in_process = sweeps.running_kinds() & wanted
+    if in_process:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"Sweep {live} is already running. Wait for it, or stop it first."
-                if live is not None
-                else "A sweep is already running. Wait for it, or stop it first."
-            ),
+            detail=f"{', '.join(sorted(in_process))} is already running here.",
         )
 
 
 @router.post("/sweeps", response_model=SweepOut, status_code=202)
 async def start_sweep(body: SweepRequest, db: AsyncSession = Depends(get_db)) -> SweepOut:
     """Queue a run and return immediately — these take minutes to hours."""
-    await _refuse_if_one_is_live(db)
+    await _refuse_if_kind_is_live(db, body.kinds)
     if (
         body.release_from is not None
         and body.release_to is not None
@@ -178,7 +195,7 @@ async def rerun_sweep(job_id: int, db: AsyncSession = Depends(get_db)) -> SweepO
             status_code=409,
             detail=f"Sweep {job_id} is {source.status} — stop it before re-running.",
         )
-    await _refuse_if_one_is_live(db)
+    await _refuse_if_kind_is_live(db, list(source.kinds))
 
     job = SweepJob(
         kinds=list(source.kinds),

@@ -215,7 +215,10 @@ async def estimate(db: AsyncSession, job, kind: str | None = None) -> dict:
         }
 
     if kind == "disclosures":
-        appid = progress.get("appid")
+        # The walk position once the run reports one; until then, where the
+        # row says it began. Without the fallback a continuation claims the
+        # whole catalogue is left for its first minute.
+        appid = progress.get("appid") or job.start_appid
         remaining = await _remaining_disclosures(
             db, int(appid) if appid else None, job.release_from, job.release_to
         )

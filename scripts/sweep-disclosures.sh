@@ -28,7 +28,8 @@ BATCH="${BATCH:-400}"
 START="${START:-0}"
 
 JOB="$(docker compose run --rm disclosures \
-      python -m scraper.common.job_control create disclosures 2>/dev/null | tr -d '[:space:]')"
+      python -m scraper.common.job_control create disclosures "$START" \
+      2>/dev/null | tr -d '[:space:]')"
 if [ -z "${JOB//[0-9]/}" ] && [ -n "$JOB" ]; then
   echo "registered sweep job $JOB — controllable from /admin/sweeps"
 else

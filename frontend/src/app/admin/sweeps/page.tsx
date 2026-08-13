@@ -222,7 +222,15 @@ export default function SweepsAdminPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] }),
   });
 
-  const running = (data ?? []).find((job) => ACTIVE.has(job.status));
+  const live = (data ?? []).filter((job) => ACTIVE.has(job.status));
+  /** Which collector each live sweep is occupying. One sweep per collector,
+   *  not one overall: each talks to a different Steam host, so followers and
+   *  disclosures together do not raise the request rate against either. */
+  const busy = new Map<SweepKind, SweepOut>();
+  for (const job of live) for (const kind of job.kinds) busy.set(kind, job);
+  const blockedBy = (wanted: SweepKind[]) =>
+    wanted.map((k) => busy.get(k)).find((job) => job !== undefined);
+  const startBlockedBy = blockedBy([...kinds]);
   const datesApply = [...kinds].some(
     (k) => SWEEPERS.find((s) => s.kind === k)?.respectsDates,
   );
@@ -314,7 +322,9 @@ export default function SweepsAdminPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Button
             onClick={() => start.mutate()}
-            disabled={kinds.size === 0 || start.isPending || running !== undefined}
+            disabled={
+              kinds.size === 0 || start.isPending || startBlockedBy !== undefined
+            }
             className="gap-2"
           >
             {start.isPending ? (
@@ -324,10 +334,12 @@ export default function SweepsAdminPage() {
             )}
             Run {kinds.size > 0 ? `${kinds.size} sweeper${kinds.size > 1 ? "s" : ""}` : "…"}
           </Button>
-          {running ? (
+          {startBlockedBy ? (
             <span className="text-xs text-muted">
-              A sweep is already running — only one at a time, so concurrent runs
-              cannot multiply the request rate against Steam.
+              Sweep {startBlockedBy.id} is already running{" "}
+              {startBlockedBy.kinds.join(" + ")} — one sweep per collector, so
+              concurrent runs cannot multiply the request rate against Steam.
+              Other collectors can still be started.
             </span>
           ) : null}
           {start.isError ? (
@@ -345,7 +357,15 @@ export default function SweepsAdminPage() {
       ) : null}
 
       <Card className="flex flex-col gap-3 p-5">
-        <h2 className="text-sm font-medium text-muted">Recent runs</h2>
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h2 className="text-sm font-medium text-muted">Recent runs</h2>
+          {live.length > 0 ? (
+            <span className="text-xs text-muted">
+              — Continue is unavailable for a collector that is already sweeping:{" "}
+              {[...busy.keys()].join(", ")}.
+            </span>
+          ) : null}
+        </div>
         {(data ?? []).length === 0 ? (
           <p className="text-sm text-muted">No sweeps yet.</p>
         ) : (
@@ -400,7 +420,17 @@ export default function SweepsAdminPage() {
                     onClick={() => rerun.mutate(job.id)}
                     // Same one-at-a-time rule as the Run button: a second
                     // sweep would double the request rate against Steam.
-                    disabled={rerun.isPending || running !== undefined}
+                    disabled={rerun.isPending || blockedBy(job.kinds) !== undefined}
+                    // A disabled control has to say why. Without this the
+                    // button reads as broken for the many hours a sweep runs.
+                    title={
+                      blockedBy(job.kinds)
+                        ? `Sweep ${blockedBy(job.kinds)!.id} is already running ` +
+                          `${job.kinds.join(" + ")}. Stop it first — two sweeps of ` +
+                          "the same collector would double the request rate " +
+                          "against that Steam host."
+                        : undefined
+                    }
                     className="h-7 gap-1.5 px-2 text-xs"
                   >
                     <RotateCw size={11} aria-hidden />

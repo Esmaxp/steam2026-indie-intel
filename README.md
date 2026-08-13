@@ -183,8 +183,10 @@ pick up new developer announcements.
 All three can also be triggered from the dashboard at **Data sweeps** in the
 header (http://localhost:4000/admin/sweeps): tick any combination, optionally
 narrow which games are scanned by release date, and watch live progress. One
-sweep runs at a time so concurrent runs cannot multiply the request rate
-against Steam.
+sweep runs at a time **per collector**, so concurrent runs cannot multiply the
+request rate against Steam. Different collectors can run together — followers
+talks to steamcommunity.com, disclosures to api.steampowered.com and rank to
+store.steampowered.com, so they do not compete.
 
 Each run shows when it started, how long it has been going, and how much is
 left. The ETA is labelled **measured** when it comes from observed throughput

@@ -21,6 +21,7 @@ sweep was started.
 """
 
 import asyncio
+import contextlib
 import datetime
 import logging
 
@@ -31,14 +32,26 @@ from app.models import Game, SweepJob
 
 logger = logging.getLogger(__name__)
 
-# Only one sweep at a time. Concurrent runs would multiply the request rate
-# against Steam — exactly what happened when orphaned containers overlapped.
-_run_lock = asyncio.Lock()
-_current_task: asyncio.Task | None = None
+# One sweep per collector, not one sweep overall. Each collector talks to a
+# different Steam host — followers to steamcommunity.com, disclosures to
+# api.steampowered.com, rank to store.steampowered.com — so running two
+# different ones concurrently does not raise the request rate against any of
+# them. Two of the SAME kind does, which is the failure this project already
+# hit when orphaned containers overlapped.
+_kind_locks: dict[str, asyncio.Lock] = {}
+# Strong references, so a run is not garbage collected mid-flight — asyncio
+# does not otherwise guarantee it.
+_tasks: set[asyncio.Task] = set()
 
 
-def is_running() -> bool:
-    return _current_task is not None and not _current_task.done()
+def _lock_for(kind: str) -> asyncio.Lock:
+    return _kind_locks.setdefault(kind, asyncio.Lock())
+
+
+def running_kinds() -> set[str]:
+    """Collectors busy in THIS process. Says nothing about CLI sweeps, which
+    run elsewhere — the database is what those two paths share."""
+    return {kind for kind, lock in _kind_locks.items() if lock.locked()}
 
 
 async def _set(job_id: int, **values) -> None:
@@ -152,7 +165,16 @@ async def _run_kind(job: SweepJob, kind: str) -> dict:
 
 
 async def _execute(job_id: int) -> None:
-    async with _run_lock:
+    async with async_session_factory() as db:
+        row = await db.get(SweepJob, job_id)
+        if row is None:
+            return
+        kinds_for_lock = sorted(row.kinds)
+    # Sorted so two jobs requesting overlapping kinds cannot deadlock by
+    # taking them in opposite orders.
+    async with contextlib.AsyncExitStack() as stack:
+        for kind in kinds_for_lock:
+            await stack.enter_async_context(_lock_for(kind))
         async with async_session_factory() as db:
             job = await db.get(SweepJob, job_id)
             if job is None:
@@ -178,7 +200,11 @@ async def _execute(job_id: int) -> None:
                 await _set(job_id, active_kind=kind)
                 summary = await _run_kind(snapshot, kind)
                 results[kind] = summary
-                await report(job_id, kind, {**summary, "done": True})
+                # Not "done" if it was stopped part-way: the badge would
+                # claim a cancelled run finished its work.
+                await report(
+                    job_id, kind, {**summary, "done": not summary.get("stopped")}
+                )
         except Exception as exc:  # noqa: BLE001 — surface it on the job row
             logger.exception("sweep %s failed", job_id)
             await _set(
@@ -202,7 +228,7 @@ async def _execute(job_id: int) -> None:
 
 
 def launch(job_id: int) -> None:
-    """Fire-and-forget. A reference is kept so the task is not garbage
-    collected mid-run, which asyncio does not otherwise guarantee."""
-    global _current_task
-    _current_task = asyncio.create_task(_execute(job_id))
+    """Fire-and-forget, with a reference held until the run ends."""
+    task = asyncio.create_task(_execute(job_id))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)

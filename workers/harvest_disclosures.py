@@ -247,7 +247,7 @@ def main() -> None:
 
         on_progress, should_stop = make_controls(args.job_id, "disclosures")
 
-    asyncio.run(
+    summary = asyncio.run(
         run(
             limit=args.limit,
             start_appid=args.start_appid,
@@ -257,6 +257,12 @@ def main() -> None:
             should_stop=should_stop,
         )
     )
+    if on_progress is not None:
+        # Report the summary too, not just the periodic counters. Progress is
+        # emitted every PROGRESS_EVERY games, so without this the recorded
+        # walk position lags the real one by up to that many games and a
+        # continuation re-reads them.
+        asyncio.run(on_progress(summary))
 
 
 if __name__ == "__main__":

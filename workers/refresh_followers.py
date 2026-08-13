@@ -226,7 +226,7 @@ def main() -> None:
 
         on_progress, should_stop = make_controls(args.job_id, "followers")
 
-    asyncio.run(
+    summary = asyncio.run(
         run(
             limit=args.limit,
             min_age_hours=args.min_age_hours,
@@ -237,6 +237,10 @@ def main() -> None:
             should_stop=should_stop,
         )
     )
+    if on_progress is not None:
+        # The batch's final counters, so the UI shows what it actually did
+        # rather than the last periodic sample.
+        asyncio.run(on_progress(summary))
 
 
 if __name__ == "__main__":
