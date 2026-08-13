@@ -180,6 +180,31 @@ Demand-signal flow (no keys at all — every source is Valve's own): run
 Followers Δ14d and Rank Δ7d meaningful, and `disclosures` occasionally to
 pick up new developer announcements.
 
+### Keeping the movement signals fed
+
+`rank_delta_7d` differences the newest complete chart sweep against the newest
+one at least seven days old, and `follower_delta_14d` does the same at
+fourteen. Both stay structurally empty unless something takes the same
+measurement twice — which reads on screen exactly like "nothing moved".
+
+The `scheduler` service runs with the stack and handles the rank sweep: 53
+requests and ~3 minutes, so daily costs nothing and brings the 7-day delta
+online a week after the first run. Each scheduled run registers a `sweep_jobs`
+row, so it appears in /admin/sweeps and can be paused or stopped there like any
+other.
+
+```bash
+SWEEP_SCHEDULE="rank:24"                 # the default — daily chart sweep
+SWEEP_SCHEDULE="rank:24,disclosures:168" # add a weekly disclosure re-scan
+SWEEP_SCHEDULE=""                        # off
+```
+
+**Followers are deliberately not on a clock.** A full catalogue pass is 23,078
+games at 4s — about 26 hours — so a daily trigger would queue a second pass
+before the first finished. That series is built by leaving
+`scripts/sweep-followers.sh` running instead, which refreshes each game roughly
+every 26h and so produces a 14-day delta at day 14.
+
 All three can also be triggered from the dashboard at **Data sweeps** in the
 header (http://localhost:4000/admin/sweeps): tick any combination, optionally
 narrow which games are scanned by release date, and watch live progress. One

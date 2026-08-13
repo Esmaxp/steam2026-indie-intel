@@ -10,6 +10,7 @@ still says otherwise.
 
 from app.api.v1 import market as market_api
 from app.services import market
+from workers import scheduler
 
 
 def test_price_bands_do_not_overlap_or_gap():
@@ -152,3 +153,40 @@ def test_smoothing_stops_a_launch_day_game_dominating_on_one_day_of_noise():
     raw = 20 / 1
     smoothed = 20 / (1 + market.SMOOTHING_DAYS)
     assert raw > 15 > smoothed
+
+
+# --- scheduled collection --------------------------------------------------
+#
+# rank_delta_7d differences two sweeps a week apart. Nothing produced a second
+# sweep until the scheduler existed, so the column was structurally empty —
+# which reads identically to "no game moved".
+
+
+def test_schedule_parses_kinds_and_intervals():
+    assert scheduler.parse_schedule("rank:24") == {"rank": 24.0}
+    assert scheduler.parse_schedule("rank:24,disclosures:168") == {
+        "rank": 24.0,
+        "disclosures": 168.0,
+    }
+
+
+def test_a_kind_without_an_interval_defaults_to_daily():
+    assert scheduler.parse_schedule("rank") == {"rank": 24.0}
+
+
+def test_an_empty_schedule_disables_rather_than_falling_back():
+    """Setting SWEEP_SCHEDULE="" has to mean off. Treating it as "use the
+    default" would restart collection on a host that deliberately stopped it."""
+    assert scheduler.parse_schedule("") == {}
+    assert scheduler.parse_schedule("   ") == {}
+
+
+def test_an_unset_schedule_uses_the_default():
+    assert scheduler.parse_schedule(None) == scheduler.DEFAULT_SCHEDULE
+
+
+def test_followers_are_not_on_the_default_clock():
+    """A full follower pass is 23,078 games at 4s — about 26 hours. Scheduling
+    it daily would queue a second pass before the first finished, so that
+    series is built by a long-running loop instead."""
+    assert "followers" not in scheduler.DEFAULT_SCHEDULE

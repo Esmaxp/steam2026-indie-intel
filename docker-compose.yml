@@ -190,6 +190,32 @@
       - ./logs:/data/logs
     command: ["python", "-m", "scraper.collectors.run_rank_sweep"]
 
+  # Keeps the movement signals fed. rank_delta_7d differences the newest chart
+  # sweep against the newest one at least 7 days old, so it stays structurally
+  # empty unless something runs a sweep on a cadence — that is this service.
+  #
+  # The rank sweep is 53 requests and ~3 minutes, so daily is cheap. Followers
+  # are NOT on a clock here: a full pass is ~26h, so that series is built by
+  # leaving scripts/sweep-followers.sh running instead.
+  #
+  # SWEEP_SCHEDULE="" disables it; "rank:24,disclosures:168" adds more.
+  scheduler:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SWEEP_SCHEDULE: ${SWEEP_SCHEDULE:-rank:24}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.scheduler"]
+
   # Low-priority backfill — run occasionally:  docker compose run --rm websites
   #   with flags: docker compose run --rm websites python -m workers.backfill_websites --limit 300
   websites:
