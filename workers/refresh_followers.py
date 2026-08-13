@@ -35,6 +35,9 @@ from scraper.common.http import SteamClient, make_session
 from scraper.common.logging import setup_logging
 
 SOURCE_NAME = "steamcommunity.com (hub members)"
+# Flush to the database this often so a multi-hour sweep is crash-safe.
+COMMIT_EVERY = 50
+PROGRESS_EVERY = 100
 
 
 def latest_follower_sq():
@@ -87,7 +90,7 @@ async def run(
     async with make_session() as http:
         client = SteamClient(http, min_interval=interval)
         async with async_session_factory() as db:
-            for appid in appids:
+            for index, appid in enumerate(appids, start=1):
                 try:
                     result = await fetch_followers(client, appid)
                 except Exception as exc:  # noqa: BLE001 — one bad game must not end the run
@@ -108,6 +111,20 @@ async def run(
                             source_name=SOURCE_NAME,
                             source_url=result.source_url,
                         )
+                    )
+                    # Commit in batches, not once at the end. A full catalogue
+                    # sweep runs for hours; a single trailing commit would
+                    # discard every row if the run were interrupted at any
+                    # point, and the next run would start from zero. With
+                    # periodic commits an interrupted sweep simply resumes —
+                    # select_stale() skips whatever already has a fresh
+                    # snapshot.
+                    if written % COMMIT_EVERY == 0:
+                        await db.commit()
+                if index % PROGRESS_EVERY == 0:
+                    logger.info(
+                        "%s/%s scanned — %s written, %s no hub, %s failed",
+                        index, len(appids), written, no_group, failed,
                     )
             if not dry_run:
                 await db.commit()
