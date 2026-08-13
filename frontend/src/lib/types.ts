@@ -342,6 +342,10 @@ export interface SweepOut {
   /** Games left for `active_kind`, counted from the database rather than from
    *  the current batch's counters. */
   remaining: number | null;
+  /** Everything this sweep could visit. With `remaining` it gives job-level
+   *  progress, which for a CLI sweep is the only honest one — its counters
+   *  describe the 400-game batch in flight, not the job. */
+  scope_total: number | null;
   eta_seconds: number | null;
   /** "measured" from real throughput, or "estimated" from the configured
    *  request interval. Shown so the ETA does not imply precision it lacks. */

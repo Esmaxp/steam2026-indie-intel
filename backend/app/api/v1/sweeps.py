@@ -70,6 +70,10 @@ class SweepOut(BaseModel):
     # rate was measured from real throughput or assumed from the configured
     # request interval — the UI should not imply precision it does not have.
     remaining: int | None = None
+    # Everything this sweep could visit. With `remaining` it gives job-level
+    # progress — which for a CLI sweep is the only honest one, since its
+    # counters describe the 400-game batch in flight.
+    scope_total: int | None = None
     eta_seconds: int | None = None
     eta_basis: str | None = None
 
@@ -85,7 +89,8 @@ def _out(job: SweepJob, eta: dict | None = None) -> SweepOut:
         active_kind=job.active_kind, runner=job.runner,
         start_appid=job.start_appid,
         progress=job.progress or {}, error=job.error,
-        remaining=eta.get("remaining"), eta_seconds=eta.get("eta_seconds"),
+        remaining=eta.get("remaining"), scope_total=eta.get("scope_total"),
+        eta_seconds=eta.get("eta_seconds"),
         eta_basis=eta.get("basis"),
     )
 

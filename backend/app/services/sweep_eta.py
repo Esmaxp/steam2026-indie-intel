@@ -39,7 +39,12 @@ MIN_RATE_BATCHES = 4
 MIN_HIT_RATIO_SAMPLES = 100
 # Matches refresh_followers' default staleness cutoff.
 FOLLOWER_MIN_AGE_HOURS = 20
-UNKNOWN = {"remaining": None, "eta_seconds": None, "basis": "unknown"}
+UNKNOWN = {
+    "remaining": None,
+    "scope_total": None,
+    "eta_seconds": None,
+    "basis": "unknown",
+}
 
 
 def _latest_follower_sq():
@@ -51,30 +56,46 @@ def _latest_follower_sq():
     )
 
 
-async def _remaining_followers(
-    db: AsyncSession,
+def _scope(
     include_released: bool,
     release_from: datetime.date | None,
     release_to: datetime.date | None,
-) -> int:
-    """Mirrors refresh_followers.select_stale(): no snapshot, or a stale one."""
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
-        hours=FOLLOWER_MIN_AGE_HOURS
-    )
-    lf = _latest_follower_sq()
-    stmt = (
-        sa.select(sa.func.count())
-        .select_from(Game)
-        .outerjoin(lf, lf.c.appid == Game.appid)
-        .where(sa.or_(lf.c.appid.is_(None), lf.c.captured_at < cutoff))
-    )
+):
+    """Every game this sweep could visit, before subtracting what is done."""
+    stmt = sa.select(sa.func.count()).select_from(Game)
     if not include_released:
         stmt = stmt.where(Game.is_released.is_(False))
     if release_from is not None:
         stmt = stmt.where(Game.release_date >= release_from)
     if release_to is not None:
         stmt = stmt.where(Game.release_date <= release_to)
-    return (await db.execute(stmt)).scalar_one()
+    return stmt
+
+
+async def _remaining_followers(
+    db: AsyncSession,
+    include_released: bool,
+    release_from: datetime.date | None,
+    release_to: datetime.date | None,
+) -> tuple[int, int]:
+    """(remaining, scope_total).
+
+    Remaining mirrors refresh_followers.select_stale(): no snapshot, or one
+    older than the staleness cutoff.
+    """
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+        hours=FOLLOWER_MIN_AGE_HOURS
+    )
+    lf = _latest_follower_sq()
+    stmt = (
+        _scope(include_released, release_from, release_to)
+        .outerjoin(lf, lf.c.appid == Game.appid)
+        .where(sa.or_(lf.c.appid.is_(None), lf.c.captured_at < cutoff))
+    )
+    total = (
+        await db.execute(_scope(include_released, release_from, release_to))
+    ).scalar_one()
+    return (await db.execute(stmt)).scalar_one(), total
 
 
 def rate_from_batches(batches: list[tuple[datetime.datetime, int]]) -> float | None:
@@ -160,21 +181,18 @@ async def _remaining_disclosures(
     appid: int | None,
     release_from: datetime.date | None,
     release_to: datetime.date | None,
-) -> int:
-    """Games left in the appid-ordered walk.
+) -> tuple[int, int]:
+    """(remaining, scope_total) for the appid-ordered walk.
 
     The harvester writes only for the ~5% of games that announced anything,
     so unlike followers there is no per-game trail in the database — the walk
     position reported by the worker is the only anchor.
     """
-    stmt = sa.select(sa.func.count()).select_from(Game)
+    left = _scope(True, release_from, release_to)
     if appid is not None:
-        stmt = stmt.where(Game.appid > appid)
-    if release_from is not None:
-        stmt = stmt.where(Game.release_date >= release_from)
-    if release_to is not None:
-        stmt = stmt.where(Game.release_date <= release_to)
-    return (await db.execute(stmt)).scalar_one()
+        left = left.where(Game.appid > appid)
+    total = (await db.execute(_scope(True, release_from, release_to))).scalar_one()
+    return (await db.execute(left)).scalar_one(), total
 
 
 async def estimate(db: AsyncSession, job, kind: str | None = None) -> dict:
@@ -190,7 +208,7 @@ async def estimate(db: AsyncSession, job, kind: str | None = None) -> dict:
         # and the CLI path takes it as a flag. Absent a report, assume the
         # broader scope so the ETA is not optimistic.
         include_released = bool(progress.get("include_released", True))
-        remaining = await _remaining_followers(
+        remaining, scope_total = await _remaining_followers(
             db, include_released, job.release_from, job.release_to
         )
         # A paused sweep has no throughput to measure — whatever is left in
@@ -205,11 +223,13 @@ async def estimate(db: AsyncSession, job, kind: str | None = None) -> dict:
         if rate:
             return {
                 "remaining": remaining,
+                "scope_total": scope_total,
                 "eta_seconds": int(remaining / rate),
                 "basis": "measured",
             }
         return {
             "remaining": remaining,
+            "scope_total": scope_total,
             "eta_seconds": int(remaining * NOMINAL_INTERVAL["followers"]),
             "basis": "estimated",
         }
@@ -219,11 +239,12 @@ async def estimate(db: AsyncSession, job, kind: str | None = None) -> dict:
         # row says it began. Without the fallback a continuation claims the
         # whole catalogue is left for its first minute.
         appid = progress.get("appid") or job.start_appid
-        remaining = await _remaining_disclosures(
+        remaining, scope_total = await _remaining_disclosures(
             db, int(appid) if appid else None, job.release_from, job.release_to
         )
         return {
             "remaining": remaining,
+            "scope_total": scope_total,
             "eta_seconds": int(remaining * NOMINAL_INTERVAL["disclosures"]),
             "basis": "estimated",
         }
@@ -231,6 +252,11 @@ async def estimate(db: AsyncSession, job, kind: str | None = None) -> dict:
     if kind == "rank":
         # One bounded sweep of a chart Valve paginates itself: ~53 requests,
         # a few minutes. Not worth counting rows for.
-        return {"remaining": None, "eta_seconds": 200, "basis": "estimated"}
+        return {
+            "remaining": None,
+            "scope_total": None,
+            "eta_seconds": 200,
+            "basis": "estimated",
+        }
 
     return dict(UNKNOWN)

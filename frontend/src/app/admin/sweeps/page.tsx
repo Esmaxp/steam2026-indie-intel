@@ -126,17 +126,22 @@ function Timing({ job }: { job: SweepOut }) {
 /** Collector summaries differ in shape, so render whatever counters came back
  *  rather than assuming a fixed set.
  *
- *  `batch` matters: a CLI sweep runs as a series of 400-game containers, so
- *  its counters describe the batch in flight, not the job. Rendering that as
- *  a bare "50%" would claim the sweep is half done when it has hours to go. */
+ *  The BAR tracks the job, not the batch. A CLI sweep runs as a series of
+ *  400-game containers, so its counters describe only the container in
+ *  flight — a bar drawn from them sits at 100% for the couple of minutes
+ *  between one batch ending and the next reporting, which reads as a finished
+ *  sweep that failed to notice. `job` carries catalogue-wide progress counted
+ *  from the database; the batch counters stay as text beside it. */
 function ProgressLine({
   kind,
   data,
   batch,
+  job,
 }: {
   kind: string;
   data: Record<string, unknown>;
   batch: boolean;
+  job?: { done: number; total: number };
 }) {
   const entries = Object.entries(data).filter(
     ([key, value]) =>
@@ -144,15 +149,37 @@ function ProgressLine({
   );
   const total = Number(data.total ?? 0);
   const processed = Number(data.processed ?? 0);
-  const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : null;
+  const batchPct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : null;
+  const pct = job
+    ? Math.min(100, Math.round((job.done / Math.max(1, job.total)) * 100))
+    : batchPct;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 text-xs">
         <span className="font-medium">{kind}</span>
-        {pct !== null ? (
+        {job ? (
+          <span
+            className="tabular-nums text-muted"
+            // Catalogue coverage, not this run's own tally: a resumable sweep
+            // continues where earlier ones left off, and the ETA is the time
+            // to close the same gap.
+            title={
+              `${fmtInt(job.total - job.done)} of ${fmtInt(job.total)} games still ` +
+              "need this collector. Counts work done by earlier runs too, since " +
+              "each run continues where the last stopped."
+            }
+          >
+            {fmtInt(job.done)} / {fmtInt(job.total)} games covered ({pct}%)
+          </span>
+        ) : batchPct !== null ? (
           <span className="tabular-nums text-muted">
             {batch ? "current batch " : ""}
-            {fmtInt(processed)} / {fmtInt(total)} ({pct}%)
+            {fmtInt(processed)} / {fmtInt(total)} ({batchPct}%)
+          </span>
+        ) : null}
+        {job && batchPct !== null ? (
+          <span className="tabular-nums text-[11px] text-muted">
+            · batch {fmtInt(processed)}/{fmtInt(total)}
           </span>
         ) : null}
         {data.done ? <Badge className="border-good-text/40 text-good-text">done</Badge> : null}
@@ -449,8 +476,40 @@ export default function SweepsAdminPage() {
                       kind={kind}
                       data={payload}
                       batch={job.runner === "cli"}
+                      job={
+                        // Only for the collector currently executing: the
+                        // remaining count describes that one, not a step the
+                        // job finished earlier.
+                        kind === (job.active_kind ?? job.kinds[0]) &&
+                        job.scope_total !== null &&
+                        job.remaining !== null
+                          ? {
+                              done: job.scope_total - job.remaining,
+                              total: job.scope_total,
+                            }
+                          : undefined
+                      }
                     />
                   ))}
+                </div>
+              ) : ACTIVE.has(job.status) &&
+                job.scope_total !== null &&
+                job.remaining !== null ? (
+                // Job-level progress is counted from the database, so it is
+                // known before the run has reported anything.
+                <div className="mt-2">
+                  <ProgressLine
+                    kind={job.active_kind ?? job.kinds[0]}
+                    data={{}}
+                    batch={false}
+                    job={{
+                      done: job.scope_total - job.remaining,
+                      total: job.scope_total,
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    Starting… per-batch counters appear shortly.
+                  </p>
                 </div>
               ) : ACTIVE.has(job.status) ? (
                 <p className="mt-2 text-xs text-muted">
