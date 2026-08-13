@@ -100,6 +100,8 @@ async def finish(job_id: int, status: str, error: str | None = None) -> None:
         job.status = status
         job.error = error
         job.active_kind = None
+        job.paused = False
+        job.paused_at = None
         job.finished_at = datetime.datetime.now(datetime.timezone.utc)
         await db.commit()
 

@@ -222,6 +222,51 @@ would look "running" forever.
 > yet, so anyone who can reach the API can approve submissions and start
 > hours-long sweeps. Keep port 9100 bound to localhost until it is.
 
+## Market intelligence API (for the Game Market Analyzer agent)
+
+`/api/v1/market/*` is a read surface built for an LLM agent that turns this
+catalogue into game concepts. The per-game endpoints under `/api/v1/games`
+already expose everything; these return the *aggregate that answers the
+question* instead of 23,078 rows.
+
+Start at **`GET /api/v1/market/manifest`** — it returns the tool's own
+capabilities, a glossary for every metric, the success-band definitions, live
+coverage counts, and the rules below as data. An agent that reads only the
+other endpoints will eventually infer a wishlist number from followers or read
+a top-decile share as a success rate, and neither mistake is visible in a JSON
+payload.
+
+| Endpoint | Answers |
+|---|---|
+| `GET /market/manifest` | What this tool can and cannot tell you. Call first. |
+| `GET /market/coverage` | Which signals exist right now, and how densely. |
+| `GET /market/trending` | Breakouts by measured movement — or current demand leaders when nothing has moved yet. Check `basis`. |
+| `GET /market/genres` | Supply, outcome and demand per Steam genre. |
+| `GET /market/tags` | The same per tag — 429 of them, the vocabulary that actually describes a game. |
+| `GET /market/design-attributes?axis=` | How a design or commercial choice performed: `dimension`, `camera`, `graphics_style`, `engine`, `price_band`, `early_access`, `demo_available`. |
+| `GET /market/landscape?tag=&genre=` | The competitive field for a concept: size, outcomes, direct competitors, adjacent tags. Filters are ANDed. |
+
+Three properties are deliberate, and they exist because the consumer is an
+agent optimising for a confident answer:
+
+- **Every response states its own coverage.** A momentum signal needs two
+  observations separated by time. When that does not exist yet, an empty
+  trending list would read as a flat market — so `coverage.notes` says
+  outright that the time series is too young, and `basis` says whether a
+  ranking came from movement or from current standing.
+- **An unknown genre or tag is a 422, not an empty result.** Guessing
+  `Deckbuilder` (the real tag is `Deckbuilding`) would otherwise return a
+  field of zero games and read as an untapped niche rather than a typo — with
+  874 titles actually in it. The error carries near-miss suggestions.
+- **Outcome is a position, never a sale.** `top_decile_share` is the share of
+  a slice's *rankable* games in the top decile of their release-month cohort,
+  reported next to `outcome_sample` so a tag with twelve rankable games cannot
+  masquerade as a trend. Nothing here multiplies reviews into revenue.
+
+The [data-honesty rules](#data-honesty) apply in full: no wishlist figure is
+estimated, and no revenue figure exists to report. Those two constraints ship
+inside the manifest so the agent carries them into its own output.
+
 ## Data honesty
 
 Steam does **not** expose wishlist, revenue or budget numbers. Every such
