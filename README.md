@@ -124,6 +124,12 @@ Demand-signal flow (no keys at all — every source is Valve's own): run
 Followers Δ14d and Rank Δ7d meaningful, and `disclosures` occasionally to
 pick up new developer announcements.
 
+All three can also be triggered from the dashboard at **Data sweeps** in the
+header (http://localhost:4000/admin/sweeps, unlocked with `ADMIN_TOKEN`):
+tick any combination, optionally narrow which games are scanned by release
+date, and watch live progress. One sweep runs at a time so concurrent runs
+cannot multiply the request rate against Steam.
+
 ## Data honesty
 
 Steam does **not** expose wishlist, revenue or budget numbers. Every such

@@ -101,7 +101,12 @@ export default function SubmissionsAdminPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-lg font-semibold">Channel submissions</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold">Channel submissions</h1>
+          <Link href="/admin/sweeps" className="text-sm text-accent hover:underline">
+            Data sweeps →
+          </Link>
+        </div>
         <div className="flex items-center gap-2">
           {(["pending", "approved", "rejected"] as const).map((s) => (
             <button

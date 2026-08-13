@@ -27,6 +27,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               >
                 Community
               </Link>
+              {/* Both admin pages prompt for ADMIN_TOKEN and show nothing
+                  without it, so linking them costs no access — and without a
+                  link they are reachable only by typing the URL. */}
+              <Link
+                href="/admin/sweeps"
+                className="text-sm text-ink2 transition-colors hover:text-ink"
+              >
+                Data sweeps
+              </Link>
+              <Link
+                href="/admin/submissions"
+                className="text-sm text-ink2 transition-colors hover:text-ink"
+              >
+                Submissions
+              </Link>
               <span className="ml-auto text-xs text-muted">
                 Wishlist &amp; revenue are never exposed by Steam — values are
                 Confirmed / Estimated / Unknown, with sources.
