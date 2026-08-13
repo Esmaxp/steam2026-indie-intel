@@ -32,6 +32,9 @@ class Game(Base, TimestampMixin):
     appid: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     name: Mapped[str] = mapped_column(Text, index=True)
     short_description: Mapped[str | None] = mapped_column(Text)
+    # Store legal notice, kept because engine detection reads it. NULL = not
+    # captured (collected before it was persisted), '' = the store shows none.
+    legal_notice: Mapped[str | None] = mapped_column(Text)
 
     steam_store_url: Mapped[str | None] = mapped_column(Text)
     steamdb_url: Mapped[str | None] = mapped_column(Text)
@@ -78,7 +81,8 @@ class Game(Base, TimestampMixin):
         pg_enum(Dimension, "dimension"), default=Dimension.UNKNOWN, index=True
     )
     # Where the 2D/3D value came from: tag (Steam's own 2d/2.5d/3d tag) |
-    # rule_based (camera/graphics/description fallback) | vision_ai | unknown.
+    # rule_based (camera/graphics/description fallback) | vision_ai (screenshot)
+    # | similarity_ai (metadata estimate, weakest) | unknown.
     dimension_source: Mapped[str] = mapped_column(Text, default="unknown")
     camera: Mapped[Camera] = mapped_column(pg_enum(Camera, "camera"), default=Camera.UNKNOWN)
     graphics_style: Mapped[GraphicsStyle] = mapped_column(

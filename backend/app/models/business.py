@@ -86,7 +86,7 @@ class RevenueEstimate(Base):
     )
     # 'disclosed' only. The vendor values (gamalytic|steamspy|vginsights) are
     # historical: those collectors were retired when the project moved to
-    # first-party signals, and their rows are removed in migration 0012.
+    # first-party signals, and their rows are removed in migration 0013.
     source_name: Mapped[str] = mapped_column(Text)
     status: Mapped[DataStatus] = mapped_column(
         pg_enum(DataStatus, "data_status"), default=DataStatus.ESTIMATED

@@ -113,6 +113,8 @@ class GameListItem(BaseModel):
     wishlist: Provenanced = Provenanced()
     revenue: Provenanced = Provenanced()
     estimated_sales: int | None = None
+    # Cached community-video clip count (0 = none fetched/found).
+    video_count: int = 0
 
 
 class BudgetEstimateOut(BaseModel):

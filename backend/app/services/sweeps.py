@@ -11,7 +11,7 @@ containers behind when the client goes away (a failure this project has
 already hit once).
 
 A backend restart kills any in-flight run. That is recorded rather than
-hidden: migration 0013 marks surviving rows `interrupted` on startup, and
+hidden: migration 0014 marks surviving rows `interrupted` on startup, and
 every collector is resumable, so re-running continues where it stopped.
 """
 

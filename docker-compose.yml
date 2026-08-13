@@ -49,7 +49,9 @@
       timeout: 5s
       retries: 12
 
-  # Phase 2 — run on demand:  docker compose run --rm discovery [--mode applist --limit 1000]
+  # Phase 2 — run on demand:  docker compose run --rm discovery
+  # With flags, spell out the module (compose replaces `command:` with the args):
+  #   docker compose run --rm discovery python -m scraper.discovery.run --mode applist --limit 1000
   discovery:
     build:
       context: .
@@ -67,7 +69,8 @@
     volumes:
       - ./logs:/data/logs
 
-  # Phase 3 — run on demand:  docker compose run --rm collector [--limit 500]
+  # Phase 3 — run on demand:  docker compose run --rm collector
+  #   with flags: docker compose run --rm collector python -m scraper.collectors.run --limit 500
   collector:
     build:
       context: .
@@ -187,7 +190,8 @@
       - ./logs:/data/logs
     command: ["python", "-m", "scraper.collectors.run_rank_sweep"]
 
-  # Low-priority backfill — run occasionally:  docker compose run --rm websites [--limit 300]
+  # Low-priority backfill — run occasionally:  docker compose run --rm websites
+  #   with flags: docker compose run --rm websites python -m workers.backfill_websites --limit 300
   websites:
     build:
       context: .
@@ -206,7 +210,8 @@
       - ./logs:/data/logs
     command: ["python", "-m", "workers.backfill_websites"]
 
-  # Channel discovery — run in batches:  docker compose run --rm scanner [--limit 200]
+  # Channel discovery — run in batches:  docker compose run --rm scanner
+  #   with flags: docker compose run --rm scanner python -m workers.scan_websites --limit 200
   scanner:
     build:
       context: .
@@ -225,7 +230,29 @@
       - ./logs:/data/logs
     command: ["python", "-m", "workers.scan_websites"]
 
-  # Opt-in, costs real API money — run manually:  docker compose run --rm dimension_vision [--limit 100]
+  # Free offline replay of the rule-based classifier over already-collected
+  # games (dimension / camera / graphics style). Fills only, never overwrites.
+  #   docker compose run --rm reclassify python -m workers.reclassify_classification --dry-run
+  reclassify:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.reclassify_classification"]
+
+  # Opt-in, costs real API money. Flags need the full command form:
+  #   docker compose run --rm dimension_vision python -m workers.classify_dimension_vision --limit 100
   # Only touches games still dimension=unknown after the free rule-based pass.
   dimension_vision:
     build:
@@ -246,6 +273,31 @@
     volumes:
       - ./logs:/data/logs
     command: ["python", "-m", "workers.classify_dimension_vision"]
+
+  # Opt-in, costs real API money. Flags need the full command form (compose
+  # replaces `command:` with whatever follows the service name):
+  #   docker compose run --rm dimension_similarity python -m workers.classify_dimension_similarity --limit 100
+  # Last resort after the rule-based and vision passes: estimates 2D/3D from
+  # metadata similarity for games no tag, rule or screenshot could settle.
+  dimension_similarity:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_TEXT_MODEL: ${ANTHROPIC_TEXT_MODEL:-claude-opus-5}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.classify_dimension_similarity"]
 
   # Scheduled worker — run daily:  docker compose run --rm refresher
   refresher:
@@ -313,7 +365,8 @@
         python -m scraper.discovery.run --mode search --max-pages 2 &&
         python -m scraper.collectors.run --limit 50
 
-  # Warm the video cache for approved games:  docker compose run --rm video_prefetch [--limit 200]
+  # Warm the video cache for approved games:  docker compose run --rm video_prefetch
+  #   with flags: docker compose run --rm video_prefetch python -m workers.prefetch_videos --limit 200
   video_prefetch:
     build:
       context: .

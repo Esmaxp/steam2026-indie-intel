@@ -15,12 +15,13 @@ create duplicates.
 import datetime
 import logging
 
+import sqlalchemy as sa
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
 from app.db.session import async_session_factory
-from app.models import Game, SyncStage, SyncStatus
+from app.models import Game, SyncStage, SyncState, SyncStatus
 from scraper.common.http import SteamClient, make_session
 from scraper.common.sync import mark, pending_appids, register_pending
 from scraper.discovery.applist import APP_LIST_URL, check_app, fetch_applist
@@ -125,6 +126,130 @@ async def run_search_discovery(max_pages: int = 2000) -> dict:
 
     logger.info("Search discovery finished: %d games in %d catalog", found, TARGET_YEAR)
     return {"mode": "search", "found": found}
+
+
+async def run_untagged_search_discovery(max_pages: int = 2000) -> dict:
+    """Tag-less discovery via Steam Search — no dependency on GetAppList.
+
+    Scans ALL 2026 games (Indie tag filter removed) with the same date-sorted
+    early-stop paging as run_search_discovery, then validates only the
+    candidates the catalog doesn't already know via appdetails +
+    evaluate_app(include_untagged=True) — the exact same admission rules as
+    the applist fallback (self-published / boutique label only; the generic
+    third-party MEDIUM branch stays excluded).
+
+    Resumable: accepted games mark DISCOVERY done; rejected candidates mark
+    DISCOVERY skipped with the reason, so re-runs never re-fetch them.
+    """
+    counters = {"pages": 0, "checked": 0, "rejected": 0, "failed": 0}
+    kept: dict[str, int] = {}
+
+    async with make_session() as http:
+        search_client = SteamClient(http, min_interval=SEARCH_MIN_INTERVAL)
+        details_client = SteamClient(http, min_interval=APPDETAILS_MIN_INTERVAL)
+
+        async def process_candidates(db, rows) -> None:
+            """rows: SearchRows already parsed to the target year."""
+            appids = [row.appid for row in rows]
+            if not appids:
+                return
+            known = set(
+                (await db.execute(sa.select(Game.appid).where(Game.appid.in_(appids))))
+                .scalars()
+                .all()
+            )
+            evaluated = set(
+                (
+                    await db.execute(
+                        sa.select(SyncState.appid).where(
+                            SyncState.stage == SyncStage.DISCOVERY,
+                            SyncState.appid.in_(appids),
+                            SyncState.status.in_([SyncStatus.DONE, SyncStatus.SKIPPED]),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                if row.appid in known or row.appid in evaluated:
+                    continue
+                try:
+                    check = await check_app(
+                        details_client, row.appid, TARGET_YEAR, include_untagged=True
+                    )
+                except Exception as exc:
+                    counters["failed"] += 1
+                    await mark(
+                        db, row.appid, SyncStage.DISCOVERY, SyncStatus.FAILED, str(exc)[:500]
+                    )
+                    continue
+                counters["checked"] += 1
+                if check.keep:
+                    await upsert_game(
+                        db, check.appid, check.name, check.release,
+                        coming_soon=check.coming_soon,
+                        discovery_method=check.discovery_method,
+                    )
+                    kept[check.discovery_method] = kept.get(check.discovery_method, 0) + 1
+                else:
+                    counters["rejected"] += 1
+                    await mark(
+                        db, row.appid, SyncStage.DISCOVERY, SyncStatus.SKIPPED, check.reason
+                    )
+            await db.commit()
+
+        # Pass 1 — released games of every genre, newest first; stop once a
+        # whole page falls before the target year (same rule as the tagged pass).
+        logger.info("Untagged pass 1: released games (no Indie tag filter)")
+        async with async_session_factory() as db:
+            async for rows, _total in iter_search_pages(
+                search_client, {"sort_by": "Released_DESC", "tags": ""}, max_pages
+            ):
+                counters["pages"] += 1
+                page_years = []
+                candidates = []
+                for row in rows:
+                    parsed = parse_release(row.release_text)
+                    if parsed.year is not None:
+                        page_years.append(parsed.year)
+                    if parsed.year == TARGET_YEAR:
+                        candidates.append(row)
+                await process_candidates(db, candidates)
+                if counters["pages"] % 25 == 0:
+                    logger.info(
+                        "Untagged progress: %d pages — checked %d, kept %s, rejected %d",
+                        counters["pages"], counters["checked"], kept, counters["rejected"],
+                    )
+                if page_years and max(page_years) < TARGET_YEAR:
+                    logger.info("Reached pre-%d releases — stopping pass 1", TARGET_YEAR)
+                    break
+
+        # Pass 2 — coming-soon games whose announced date names the target year.
+        logger.info("Untagged pass 2: coming-soon games (no Indie tag filter)")
+        async with async_session_factory() as db:
+            async for rows, _total in iter_search_pages(
+                search_client, {"filter": "comingsoon", "tags": ""}, max_pages
+            ):
+                counters["pages"] += 1
+                candidates = [
+                    row for row in rows if parse_release(row.release_text).year == TARGET_YEAR
+                ]
+                await process_candidates(db, candidates)
+                if counters["pages"] % 25 == 0:
+                    logger.info(
+                        "Untagged progress: %d pages — checked %d, kept %s, rejected %d",
+                        counters["pages"], counters["checked"], kept, counters["rejected"],
+                    )
+
+    summary = {"mode": "search_untagged", **counters, "kept": kept}
+    logger.info(
+        "Untagged search discovery finished: %d pages, %d candidates checked, "
+        "kept %s, rejected %d, failed %d",
+        counters["pages"], counters["checked"], kept,
+        counters["rejected"], counters["failed"],
+    )
+    return summary
 
 
 async def run_targeted_discovery(appids: list[int]) -> dict:

@@ -11,31 +11,53 @@ from typing import Literal
 
 from app.models import Camera, Dimension, GameEngine, GraphicsStyle
 
+# A runner-up tag with at least this share of the winner's votes counts as a
+# real disagreement rather than noise (see _best_tag_match).
+CONFLICT_RATIO = 0.5
+
 # --- tag maps (case-insensitive tag name → enum) ---------------------------
 
+# Compound tag names are listed explicitly because matching is exact: only
+# tags that *state* the value are mapped, never ones that merely suggest it.
+# Deliberately absent: "retro" (splits between pixel art, PS1-style 3D and a
+# retro theme), "arena shooter" (both first-person and twin-stick arenas),
+# "puzzle platformer" (3D ones are common), "precision platformer" and
+# "twin stick shooter" (~90% safe — held back pending a first-pass review).
 _DIMENSION_TAGS = {
     "2d": Dimension.TWO_D,
     "2.5d": Dimension.TWO_HALF_D,
     "3d": Dimension.THREE_D,
+    "2d platformer": Dimension.TWO_D,
+    "3d platformer": Dimension.THREE_D,
 }
 
 _CAMERA_TAGS = {
     "top-down": Camera.TOP_DOWN,
     "top down": Camera.TOP_DOWN,
+    "top-down shooter": Camera.TOP_DOWN,
     "isometric": Camera.ISOMETRIC,
     "first-person": Camera.FIRST_PERSON,
     "first person": Camera.FIRST_PERSON,
+    "fps": Camera.FIRST_PERSON,  # the acronym is "first-person shooter"
+    "boomer shooter": Camera.FIRST_PERSON,  # definitionally a retro FPS
     "third person": Camera.THIRD_PERSON,
     "third-person": Camera.THIRD_PERSON,
+    "third-person shooter": Camera.THIRD_PERSON,
     "side scroller": Camera.SIDE_SCROLLER,
+    "2d platformer": Camera.SIDE_SCROLLER,  # 2D + platformer leaves only side view
 }
 
+# "Cartoony"/"Cartoon" map to STYLIZED: there is no CARTOON member, stylized is
+# the superset Steam's own "Stylized" tag already maps to, and it appears in no
+# branch of _infer_dimension so it cannot contaminate the 2D/3D inference.
 _GRAPHICS_TAGS = {
     "pixel graphics": GraphicsStyle.PIXEL_ART,
     "voxel": GraphicsStyle.VOXEL,
     "anime": GraphicsStyle.ANIME,
     "realistic": GraphicsStyle.REALISTIC,
     "stylized": GraphicsStyle.STYLIZED,
+    "cartoony": GraphicsStyle.STYLIZED,
+    "cartoon": GraphicsStyle.STYLIZED,
     "hand-drawn": GraphicsStyle.HAND_PAINTED,
 }
 
@@ -86,12 +108,27 @@ class Classification:
 
 
 def _best_tag_match(tags: list[tuple[str, int]], mapping: dict):
-    """Highest-vote tag that appears in the mapping; None when absent."""
-    best_value, best_votes = None, -1
+    """Highest-vote tag that appears in the mapping; None when absent.
+
+    Returns None as well when two tags map to *different* values and the
+    runner-up is close enough to be credible — a game tagged both "3D" and
+    "2D Platformer" has genuinely conflicting evidence. Same rule as
+    _infer_dimension: signals disagree, so nothing is claimed. A landslide
+    (the runner-up below CONFLICT_RATIO of the winner) is treated as noise,
+    which is the common case for a stray tag on a heavily-voted page.
+    """
+    votes_by_value: dict = {}
     for name, votes in tags:
         mapped = mapping.get(name.strip().lower())
-        if mapped is not None and votes > best_votes:
-            best_value, best_votes = mapped, votes
+        if mapped is not None:
+            votes_by_value[mapped] = max(votes_by_value.get(mapped, -1), votes)
+    if not votes_by_value:
+        return None
+
+    ranked = sorted(votes_by_value.items(), key=lambda item: item[1], reverse=True)
+    best_value, best_votes = ranked[0]
+    if len(ranked) > 1 and ranked[1][1] >= best_votes * CONFLICT_RATIO:
+        return None
     return best_value
 
 

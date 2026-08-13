@@ -96,6 +96,7 @@ def row_to_list_item(row) -> GameListItem:
             spread=row.revenue_spread,
         ),
         estimated_sales=row.estimated_sales,
+        video_count=row.video_count,
     )
 
 

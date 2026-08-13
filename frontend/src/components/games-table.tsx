@@ -77,6 +77,7 @@ const SORTABLE: Record<string, string> = {
   follower_delta_14d: "follower_delta_14d",
   wishlist_rank: "wishlist_rank",
   rank_delta_7d: "rank_delta_7d",
+  video_count: "videos",
 };
 
 /** Sort keys where ascending is the better value (rank 1 = top of chart). */
@@ -201,6 +202,16 @@ const columns = [
         {info.getValue() || DASH}
       </span>
     ),
+  }),
+  col.accessor("video_count", {
+    id: "video_count",
+    header: "Videos",
+    cell: (info) =>
+      info.getValue() > 0 ? (
+        <span className="tabular-nums">{info.getValue()}</span>
+      ) : (
+        <span className="text-muted">{DASH}</span>
+      ),
   }),
   col.accessor("dimension", {
     id: "dimension",
@@ -479,13 +490,26 @@ function ExpandedRow({ game }: { game: GameListItem }) {
         </div>
       ) : null}
 
-      <Link
-        href={`/games/${game.appid}`}
-        onClick={(e) => e.stopPropagation()}
-        className="w-fit text-sm text-accent hover:underline"
-      >
-        Full details →
-      </Link>
+      <div className="flex items-center gap-4 text-sm">
+        <Link
+          href={`/games/${game.appid}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-accent hover:underline"
+        >
+          Full details →
+        </Link>
+        {detail.website ? (
+          <a
+            href={detail.website}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-ink2 hover:underline"
+          >
+            Official Website <ExternalLink size={12} aria-hidden />
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }

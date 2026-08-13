@@ -381,7 +381,7 @@ harvester defaults to a dry run and requires `--write`.
 ### Revenue: no first-party source, honestly unknown
 
 The third-party estimate vendors (Gamalytic, SteamSpy, VG Insights) were
-retired and their rows deleted in migration 0012 — of 8,380 rows, 0 carried
+retired and their rows deleted in migration 0013 — of 8,380 rows, 0 carried
 revenue, 0 carried sales, and 99.8% were the 0–20,000 owners bucket. Revenue
 now has no source at all and reports `unknown` for every game.
 

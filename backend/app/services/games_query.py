@@ -27,6 +27,7 @@ from app.models import (
     RevenueRecord,
     SteamStats,
     Tag,
+    VideoCache,
     WishlistRankEntry,
     WishlistRankSweep,
     WishlistRecord,
@@ -146,6 +147,16 @@ def prior_rank_sq(days: int = RANK_DELTA_DAYS):
     return _complete_sweep_entries(max_started_at=cutoff).subquery("prior_rank")
 
 
+def video_counts_sq():
+    """Cached community-video count per game (0 rows for never-fetched games)."""
+    return (
+        sa.select(
+            VideoCache.appid,
+            sa.func.jsonb_array_length(VideoCache.payload["clips"]).label("video_count"),
+        ).subquery("video_counts")
+    )
+
+
 def next_fest_exists():
     return sa.exists(
         sa.select(sa.literal(1))
@@ -168,6 +179,8 @@ class GameFilters:
     camera: Camera | None = None
     graphics_style: GraphicsStyle | None = None
     demo_available: bool | None = None
+    has_website: bool | None = None
+    has_videos: bool | None = None
     next_fest: bool | None = None
     release_status: str = "all"  # released | upcoming | all
     early_access: bool | None = None
@@ -199,6 +212,8 @@ def build_games_query(f: GameFilters) -> GamesQuery:
     lf, pf = latest_followers_sq(), prior_followers_sq()
     lrk, prk = latest_rank_sq(), prior_rank_sq()
     nf = next_fest_exists()
+    vc = video_counts_sq()
+    video_count = sa.func.coalesce(vc.c.video_count, 0)
 
     # Derived in the SELECT, never stored: both are pure functions of two
     # rows, so materialising them would create a staleness class this schema
@@ -244,6 +259,7 @@ def build_games_query(f: GameFilters) -> GamesQuery:
             ),
             lrk.c.rank.label("wishlist_rank"),
             rank_delta.label("rank_delta"),
+            video_count.label("video_count"),
         )
         .outerjoin(ls, ls.c.appid == Game.appid)
         .outerjoin(lw, lw.c.appid == Game.appid)
@@ -256,6 +272,7 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         # must stay outer joins and "not ranked" must read as NULL.
         .outerjoin(lrk, lrk.c.appid == Game.appid)
         .outerjoin(prk, prk.c.appid == Game.appid)
+        .outerjoin(vc, vc.c.appid == Game.appid)
     )
 
     conds = []
@@ -279,6 +296,12 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         conds.append(Game.graphics_style == f.graphics_style)
     if f.demo_available is not None:
         conds.append(Game.demo_available.is_(f.demo_available))
+    if f.has_website is not None:
+        # '' means "checked, none listed"; NULL means never checked — neither counts.
+        has_site = sa.and_(Game.website.is_not(None), Game.website != "")
+        conds.append(has_site if f.has_website else sa.not_(has_site))
+    if f.has_videos is not None:
+        conds.append(video_count > 0 if f.has_videos else video_count == 0)
     if f.next_fest is not None:
         conds.append(nf if f.next_fest else sa.not_(nf))
     if f.release_status == "released":
@@ -338,10 +361,11 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         "reviews": ls.c.total_reviews,
         "positive_pct": ls.c.positive_pct,
         "peak_ccu": ls.c.peak_ccu,
-        # No `wishlist` or `revenue` sort key. Both columns are all-NULL:
-        # wishlist carries only disclosures (and mostly ">=" lower bounds,
-        # which do not order meaningfully), and revenue's only source was
-        # SteamSpy, which supplied 0 values across 8,380 rows.
+        # No `wishlist` or `revenue` sort key. Both columns end up all-NULL:
+        # wishlist carries only developer disclosures (mostly ">=" lower
+        # bounds, which do not order meaningfully), and migration 0013 deletes
+        # every vendor revenue row — the retired SteamSpy rows carried 0
+        # revenue values across 8,380 rows anyway.
         "followers": lf.c.followers,
         "follower_delta_14d": follower_delta,
         # NB: ascending is BETTER for rank (1 is the top of the chart), unlike
@@ -349,6 +373,7 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         # not "-wishlist_rank".
         "wishlist_rank": lrk.c.rank,
         "rank_delta_7d": rank_delta,
+        "videos": video_count,
     }
     sort_key = f.sort or "-release_date"
     descending = sort_key.startswith("-")
