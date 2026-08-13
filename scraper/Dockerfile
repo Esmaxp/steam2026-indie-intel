@@ -10,7 +10,7 @@ WORKDIR /srv
 
 COPY backend/pyproject.toml backend/
 COPY backend/app backend/app
-RUN pip install --upgrade pip && pip install ./backend
+RUN pip install --upgrade pip && pip install "./backend[similarity]"
 
 COPY scraper scraper
 COPY workers workers

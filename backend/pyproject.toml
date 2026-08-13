@@ -22,6 +22,10 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.48"]
+# Offline TF-IDF dimension fallback (workers/classify_dimension_local.py).
+# Kept out of the base set so the API image stays lean — only the scraper
+# image installs it. Free and local: no account, no API key, no network.
+similarity = ["scikit-learn>=1.5", "numpy>=1.26"]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "httpx>=0.27", "ruff>=0.7"]
 
 [build-system]

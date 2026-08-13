@@ -168,6 +168,27 @@
       - ./logs:/data/logs
     command: ["python", "-m", "workers.reclassify_classification"]
 
+  # Free offline similarity fallback for unresolved 2D/3D — no API key needed.
+  # Measure first:
+  #   docker compose run --rm dimension_local python -m workers.classify_dimension_local --dry-run
+  dimension_local:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.classify_dimension_local"]
+
   # Opt-in, costs real API money. Flags need the full command form:
   #   docker compose run --rm dimension_vision python -m workers.classify_dimension_vision --limit 100
   # Only touches games still dimension=unknown after the free rule-based pass.
