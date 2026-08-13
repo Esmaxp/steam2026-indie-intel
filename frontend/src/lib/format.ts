@@ -62,6 +62,25 @@ export function fmtDateTime(iso: string | null | undefined): string {
   });
 }
 
+/** The window an event occupied: "13 Aug, 14:51 → 16:27".
+ *  The end drops its date when it falls on the start's day, which is the
+ *  common case and halves the width. */
+export function fmtDateTimeRange(
+  startIso: string | null | undefined,
+  endIso: string | null | undefined,
+): string {
+  const startText = fmtDateTime(startIso);
+  if (startText === DASH || !endIso) return startText;
+  const start = new Date(startIso as string);
+  const end = new Date(endIso);
+  if (Number.isNaN(end.getTime())) return startText;
+  const sameDay = start.toDateString() === end.toDateString();
+  const endText = sameDay
+    ? end.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+    : fmtDateTime(endIso);
+  return `${startText} → ${endText}`;
+}
+
 /** A span in seconds as coarse human units ("2h 40m", "45s").
  *  Deliberately imprecise above a minute: a multi-hour sweep's ETA is an
  *  estimate, and showing seconds on it would imply otherwise. */

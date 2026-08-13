@@ -16,7 +16,7 @@ import {
   resumeSweep,
   startSweep,
 } from "@/lib/api";
-import { fmtDateTime, fmtDuration, fmtInt } from "@/lib/format";
+import { fmtDate, fmtDateTime, fmtDateTimeRange, fmtDuration, fmtInt } from "@/lib/format";
 import type { SweepKind, SweepOut } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,10 +89,17 @@ function Timing({ job }: { job: SweepOut }) {
 
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+      {/* The window the run occupied. A finished run showed only its start
+          and a duration, leaving the operator to add the two up to work out
+          when it actually ended. */}
       <span>
-        {job.started_at ? "Started " : "Queued "}
+        {!job.started_at ? "Queued " : job.finished_at ? "Ran " : "Started "}
         <span className="text-ink">
-          {fmtDateTime(job.started_at ?? job.created_at)}
+          {!job.started_at
+            ? fmtDateTime(job.created_at)
+            : job.finished_at
+              ? fmtDateTimeRange(job.started_at, job.finished_at)
+              : `${fmtDateTime(job.started_at)} → now`}
         </span>
       </span>
       {elapsed !== null ? (
@@ -407,8 +414,14 @@ export default function SweepsAdminPage() {
                 <Badge className={statusTone(job.status)}>{job.status}</Badge>
                 <span className="text-sm font-medium">{job.kinds.join(" + ")}</span>
                 {job.release_from || job.release_to ? (
-                  <span className="text-xs text-muted">
-                    {job.release_from ?? "…"} → {job.release_to ?? "…"}
+                  <span
+                    className="text-xs text-muted"
+                    title="Limits WHICH GAMES are scanned by their release date. Nothing to do with when the sweep ran."
+                  >
+                    {/* An ellipsis, not the usual DASH: a missing bound here
+                        means "no limit", not "unknown". */}
+                    games released {job.release_from ? fmtDate(job.release_from) : "…"}{" "}
+                    → {job.release_to ? fmtDate(job.release_to) : "…"}
                   </span>
                 ) : null}
                 {job.limit_per_kind ? (
