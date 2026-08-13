@@ -116,7 +116,7 @@ in order; each states its expected outcome.
 
 Community-video flow (all optional, needs `YOUTUBE_API_KEY` / `TWITCH_*` keys
 for actual videos): `websites` → `scanner` → review at
-http://localhost:4000/admin/submissions (token = `ADMIN_TOKEN` from `.env`) →
+http://localhost:4000/admin/submissions →
 `video_prefetch`.
 
 Demand-signal flow (no keys at all — every source is Valve's own): run
@@ -125,10 +125,14 @@ Followers Δ14d and Rank Δ7d meaningful, and `disclosures` occasionally to
 pick up new developer announcements.
 
 All three can also be triggered from the dashboard at **Data sweeps** in the
-header (http://localhost:4000/admin/sweeps, unlocked with `ADMIN_TOKEN`):
-tick any combination, optionally narrow which games are scanned by release
-date, and watch live progress. One sweep runs at a time so concurrent runs
-cannot multiply the request rate against Steam.
+header (http://localhost:4000/admin/sweeps): tick any combination, optionally
+narrow which games are scanned by release date, and watch live progress. One
+sweep runs at a time so concurrent runs cannot multiply the request rate
+against Steam.
+
+> **The /admin routes are unauthenticated.** Admin auth is not implemented
+> yet, so anyone who can reach the API can approve submissions and start
+> hours-long sweeps. Keep port 9100 bound to localhost until it is.
 
 ## Data honesty
 

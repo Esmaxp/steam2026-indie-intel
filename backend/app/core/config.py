@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     youtube_daily_quota: int = 8000
     twitch_daily_quota: int = 50000
     video_cache_ttl_hours: int = 24
-    # Submission-form protection + admin review access.
+    # Submission-form protection. Admin routes are unauthenticated for now
+    # — see app.api.v1.videos.require_admin.
     submission_cooldown_minutes: int = 10
-    admin_token: str = ""
 
     # Optional vision-based 2D/3D classification (workers/classify_dimension_vision).
     # Empty key = the worker refuses to run; nothing else uses this.

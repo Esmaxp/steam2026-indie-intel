@@ -33,8 +33,6 @@
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
       TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
-      # Required for the channel-submission review endpoints.
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy

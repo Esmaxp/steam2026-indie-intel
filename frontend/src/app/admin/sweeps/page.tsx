@@ -1,12 +1,13 @@
 "use client";
 
 /** Run the data collectors on demand.
- *  Auth: paste the backend's ADMIN_TOKEN — kept in sessionStorage only. */
+ *  Auth: none yet — the backend's require_admin() is a no-op pending real
+ *  admin authentication, so this page is open to anyone who can reach it. */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Play, Square } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cancelSweep, fetchSweeps, startSweep } from "@/lib/api";
 import { fmtDate, fmtInt } from "@/lib/format";
 import type { SweepKind, SweepOut } from "@/lib/types";
@@ -15,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-const TOKEN_KEY = "admin-token";
 const ACTIVE = new Set(["queued", "running"]);
 
 const SWEEPERS: {
@@ -94,23 +94,15 @@ function ProgressLine({ kind, data }: { kind: string; data: Record<string, unkno
 }
 
 export default function SweepsAdminPage() {
-  const [token, setToken] = useState("");
-  const [draft, setDraft] = useState("");
   const [kinds, setKinds] = useState<Set<SweepKind>>(new Set(["rank"]));
   const [releaseFrom, setReleaseFrom] = useState("");
   const [releaseTo, setReleaseTo] = useState("");
   const [limit, setLimit] = useState("");
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem(TOKEN_KEY);
-    if (saved) setToken(saved);
-  }, []);
-
   const { data, isError, error } = useQuery({
-    queryKey: ["admin-sweeps", token],
-    queryFn: () => fetchSweeps(token),
-    enabled: token !== "",
+    queryKey: ["admin-sweeps"],
+    queryFn: fetchSweeps,
     retry: false,
     // A sweep runs for minutes to hours; poll while one is active so the
     // page reflects it without a manual refresh.
@@ -120,7 +112,7 @@ export default function SweepsAdminPage() {
 
   const start = useMutation({
     mutationFn: () =>
-      startSweep(token, {
+      startSweep({
         kinds: [...kinds],
         release_from: releaseFrom || null,
         release_to: releaseTo || null,
@@ -130,7 +122,7 @@ export default function SweepsAdminPage() {
   });
 
   const stop = useMutation({
-    mutationFn: (id: number) => cancelSweep(token, id),
+    mutationFn: (id: number) => cancelSweep(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] }),
   });
 
@@ -146,37 +138,6 @@ export default function SweepsAdminPage() {
       else next.add(kind);
       return next;
     });
-
-  if (!token) {
-    return (
-      <Card className="mx-auto mt-10 flex max-w-md flex-col gap-3 p-6">
-        <h1 className="text-lg font-semibold">Data sweeps — admin</h1>
-        <p className="text-sm text-muted">
-          Enter the backend <code>ADMIN_TOKEN</code> to run collectors.
-        </p>
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            sessionStorage.setItem(TOKEN_KEY, draft);
-            setToken(draft);
-          }}
-        >
-          <Input
-            type="password"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="ADMIN_TOKEN"
-            className="flex-1"
-          />
-          <Button type="submit">Unlock</Button>
-        </form>
-        <Link href="/" className="text-sm text-accent hover:underline">
-          ← Back to dashboard
-        </Link>
-      </Card>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4">

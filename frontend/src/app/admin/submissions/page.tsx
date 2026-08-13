@@ -1,24 +1,20 @@
 "use client";
 
 /** Minimal review queue for "add your channel" submissions.
- *  Auth: paste the backend's ADMIN_TOKEN — kept in sessionStorage only. */
+ *  Auth: none yet — the backend's require_admin() is a no-op pending real
+ *  admin authentication, so this page is open to anyone who can reach it. */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { bulkReviewSubmissions, fetchSubmissions, reviewSubmission } from "@/lib/api";
 import { fmtDate } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-
-const TOKEN_KEY = "admin-token";
 
 export default function SubmissionsAdminPage() {
-  const [token, setToken] = useState("");
-  const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
   const [sourceFilter, setSourceFilter] = useState<
     "all" | "auto_detected" | "developer_submitted"
@@ -26,28 +22,22 @@ export default function SubmissionsAdminPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem(TOKEN_KEY);
-    if (saved) setToken(saved);
-  }, []);
-
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["admin-submissions", status, token],
-    queryFn: () => fetchSubmissions(token, status),
-    enabled: token !== "",
+    queryKey: ["admin-submissions", status],
+    queryFn: () => fetchSubmissions(status),
     retry: false,
   });
 
   const review = useMutation({
     mutationFn: ({ id, action }: { id: number; action: "approve" | "reject" }) =>
-      reviewSubmission(token, id, action),
+      reviewSubmission(id, action),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["admin-submissions"] }),
   });
 
   const bulkReview = useMutation({
     mutationFn: ({ ids, action }: { ids: number[]; action: "approve" | "reject" }) =>
-      bulkReviewSubmissions(token, ids, action),
+      bulkReviewSubmissions(ids, action),
     onSuccess: () => {
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["admin-submissions"] });
@@ -67,36 +57,6 @@ export default function SubmissionsAdminPage() {
       else next.add(id);
       return next;
     });
-
-  if (!token) {
-    return (
-      <Card className="mx-auto mt-10 flex max-w-md flex-col gap-3 p-6">
-        <h1 className="text-lg font-semibold">Channel submissions — admin</h1>
-        <p className="text-sm text-muted">
-          Enter the backend <code>ADMIN_TOKEN</code> to review submissions.
-        </p>
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (draft.trim()) {
-              sessionStorage.setItem(TOKEN_KEY, draft.trim());
-              setToken(draft.trim());
-            }
-          }}
-        >
-          <Input
-            type="password"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="admin token"
-            className="flex-1"
-          />
-          <Button type="submit">Enter</Button>
-        </form>
-      </Card>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -136,16 +96,6 @@ export default function SubmissionsAdminPage() {
             <option value="auto_detected">Auto-detected</option>
             <option value="developer_submitted">Developer</option>
           </select>
-          <button
-            onClick={() => {
-              sessionStorage.removeItem(TOKEN_KEY);
-              setToken("");
-              setDraft("");
-            }}
-            className="text-xs text-muted hover:text-ink"
-          >
-            Sign out
-          </button>
         </div>
       </div>
 
