@@ -354,10 +354,19 @@
     depends_on:
       db:
         condition: service_healthy
+    # Drop the whole schema before restoring, rather than relying on
+    # pg_restore --clean. --clean issues DROP without CASCADE, so it fails the
+    # moment the live database is at a NEWER schema than the dump: a table
+    # added by a later migration holds a foreign key into games, the DROP of
+    # games is refused, and the restore silently half-applies — games keeps
+    # its stale rows while every other table is emptied. Recreating the schema
+    # makes the restore independent of whatever revision the database was on.
     entrypoint: >
-      pg_restore --clean --if-exists --no-owner --no-privileges
+      sh -c "psql -h db -U ${POSTGRES_USER:-steam} -d ${POSTGRES_DB:-steam2026}
+      -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' &&
+      pg_restore --no-owner --no-privileges
       -h db -U ${POSTGRES_USER:-steam} -d ${POSTGRES_DB:-steam2026}
-      /seed/full_export.dump
+      /seed/full_export.dump"
 
   # Quick-start seed — real data in ~10 minutes on a fresh clone:
   #   docker compose run --rm seed
