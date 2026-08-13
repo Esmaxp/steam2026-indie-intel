@@ -9,10 +9,10 @@ from app.schemas.charts import (
     ChartsOut,
     GenreSuccessOut,
     MonthPoint,
-    SuccessTierPoint,
+    SuccessBandPoint,
 )
 from app.schemas.game import AverageStat, DashboardSummary
-from app.services import boxleiter
+from app.services import success_bands
 from app.services.games_query import (
     latest_followers_sq,
     latest_rank_sq,
@@ -133,23 +133,56 @@ async def charts(db: AsyncSession = Depends(get_db)) -> ChartsOut:
     )
 
 
+def _ranked_games_sq():
+    """Every rankable game with its percentile position among its own cohort.
+
+    Rankable means released, dated and carrying a review count — the three
+    things the ranking needs. percent_rank() runs per release month so a game
+    competes with releases that have had the same time to accumulate reviews;
+    see app.services.success_bands for why that matters.
+    """
+    ls = latest_stats_sq()
+    cohort = sa.func.date_trunc("month", Game.release_date)
+    return (
+        sa.select(
+            Game.appid.label("appid"),
+            sa.func.percent_rank()
+            .over(partition_by=cohort, order_by=ls.c.total_reviews)
+            .label("pr"),
+        )
+        .select_from(Game)
+        .join(ls, ls.c.appid == Game.appid)
+        .where(
+            Game.is_released.is_(True),
+            Game.release_date.is_not(None),
+            ls.c.total_reviews.is_not(None),
+            ls.c.total_reviews > 0,
+        )
+        .subquery("ranked")
+    )
+
+
+def _band_case(pr_column):
+    """percent_rank → band key, in SQL so the counting stays one query."""
+    return sa.case(
+        *[
+            (pr_column >= band.min_percentile, band.key)
+            for band in success_bands.SUCCESS_BANDS
+        ],
+        else_=success_bands.SUCCESS_BANDS[-1].key,
+    )
+
+
 @router.get("/genre-success", response_model=GenreSuccessOut)
 async def genre_success(
     genre: str = Query(..., min_length=1, description="Genre name, case-insensitive"),
-    multiplier: float | None = Query(
-        None,
-        description=(
-            "Override the sales-per-review multiplier. Clamped to "
-            f"{boxleiter.MULTIPLIER_RANGE[0]}–{boxleiter.MULTIPLIER_RANGE[1]}; "
-            f"default {boxleiter.DEFAULT_MULTIPLIER}."
-        ),
-    ),
     db: AsyncSession = Depends(get_db),
 ) -> GenreSuccessOut:
-    """Estimated success spread of one genre, via the review-count heuristic.
+    """Where a genre's games sit among their release-month peers.
 
-    Games without a review count are counted separately and excluded from the
-    tiers — an unknown sales figure is not a bucket.
+    Ranks Steam's own review counts — nothing is estimated, so there is no
+    multiplier to argue with. Games that cannot be ranked (unreleased, or no
+    reviews yet) are counted separately rather than dropped into a band.
     """
     in_genre = (
         sa.select(game_genres.c.appid)
@@ -164,38 +197,39 @@ async def genre_success(
     if not games_in_genre:
         raise HTTPException(status_code=404, detail=f"No games found for genre '{genre}'")
 
-    ls = latest_stats_sq()
-    review_rows = await db.execute(
-        sa.select(ls.c.total_reviews)
+    ranked = _ranked_games_sq()
+    band_key = _band_case(ranked.c.pr)
+    rows = await db.execute(
+        sa.select(band_key.label("band"), sa.func.count())
         .select_from(Game)
-        .join(ls, ls.c.appid == Game.appid)
-        .where(in_genre, ls.c.total_reviews.is_not(None), ls.c.total_reviews > 0)
+        .join(ranked, ranked.c.appid == Game.appid)
+        .where(in_genre)
+        .group_by(band_key)
     )
-    reviews = [row[0] for row in review_rows]
+    counts = {band: count for band, count in rows}
+    scored = sum(counts.values())
 
-    used_multiplier = boxleiter.clamp_multiplier(multiplier)
-    counts: dict[str, int] = {tier.key: 0 for tier in boxleiter.SUCCESS_TIERS}
-    for total_reviews in reviews:
-        tier = boxleiter.tier_for(boxleiter.estimate_sales(total_reviews, used_multiplier))
-        counts[tier.key] += 1
-
+    unreleased = await _count(db, in_genre, Game.is_released.is_(False))
     return GenreSuccessOut(
         genre=genre.strip(),
         games_in_genre=games_in_genre,
-        games_scored=len(reviews),
-        games_without_reviews=games_in_genre - len(reviews),
-        multiplier=used_multiplier,
-        formula=boxleiter.FORMULA,
-        method=boxleiter.METHOD_NAME,
-        source=boxleiter.MULTIPLIER_SOURCE,
-        tiers=[
-            SuccessTierPoint(
-                key=tier.key,
-                label=tier.label,
-                count=counts[tier.key],
-                min_sales=tier.min_sales,
-                max_sales=tier.max_sales,
+        games_scored=scored,
+        games_excluded_unreleased=unreleased,
+        # Whatever is left: released but no review count yet (or no release date).
+        games_excluded_no_reviews=games_in_genre - unreleased - scored,
+        measure=success_bands.MEASURE,
+        cohort=success_bands.COHORT,
+        method=success_bands.METHOD_NAME,
+        notes=success_bands.NOTES,
+        bands=[
+            SuccessBandPoint(
+                key=band.key,
+                label=band.label,
+                count=counts.get(band.key, 0),
+                share=round(counts.get(band.key, 0) / scored, 4) if scored else 0.0,
+                baseline_share=success_bands.BASELINE_SHARE[band.key],
+                min_percentile=band.min_percentile,
             )
-            for tier in boxleiter.SUCCESS_TIERS
+            for band in success_bands.SUCCESS_BANDS
         ],
     )

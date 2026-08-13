@@ -224,21 +224,29 @@ carried a revenue or sales figure. **SteamCharts** is kept for concurrent
 players and labelled third-party in the UI — it publishes an observed
 measurement rather than a model output.
 
-### Genre success breakdown (estimated)
+### Genre success breakdown (measured ranking)
 
-Steam publishes no sales figures either, so the analytics section's genre
-success breakdown — click a bar in "Top genres" — is an explicit heuristic: the
-Boxleiter method, `estimated_sales = total_reviews * multiplier`. The API
-returns the formula, the multiplier actually used and its source, and the UI
-prints them under the pie, the same way every other estimate carries its
-inputs. The constant lives in `backend/app/services/boxleiter.py` with its
-provenance and credible range (25-60; the "true" value varies by price, genre
-and age). Games with no review count are reported separately and excluded from
-the pie rather than guessed into a tier.
+Steam publishes no sales figures either — so rather than estimate them, the
+analytics section ranks what Valve does publish. Click a bar in "Top genres"
+and the pie shows where that genre's games sit among their peers by review
+count: top 1%, top 10%, top 25%, upper half, lower half.
+
+Two things make it a measurement rather than a guess. The measure is Steam's
+own review count, and each game is ranked inside its **release-month cohort**,
+so an August release competes with August releases (median reviews run 13 for
+January's cohort down to 6 for August's — comparing across them would bury new
+games for no reason). Because it is a ranking, no sales multiplier is involved
+and there is nothing to disagree with. The bands live in
+`backend/app/services/success_bands.py`; the response also carries each band's
+baseline share, which is what makes "this genre over-indexes" a real claim
+rather than an impression.
+
+Games that cannot be ranked — unreleased, or released with no reviews yet —
+are reported in their own counters and left out of the pie.
 
 ```bash
-curl "http://localhost:8000/api/v1/dashboard/genre-success?genre=Action"
-curl "http://localhost:8000/api/v1/dashboard/genre-success?genre=RPG&multiplier=50"
+curl "http://localhost:9100/api/v1/dashboard/genre-success?genre=RPG"
+curl "http://localhost:9100/api/v1/dashboard/genre-success?genre=Casual"
 ```
 
 ## Troubleshooting

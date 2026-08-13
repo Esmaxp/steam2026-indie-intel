@@ -7,24 +7,26 @@ import { fmtInt } from "@/lib/format";
 import { useChartTokens } from "@/hooks/use-chart-tokens";
 import { Card } from "@/components/ui/card";
 
-interface SuccessTierPoint {
+interface SuccessBandPoint {
   key: string;
   label: string;
   count: number;
-  min_sales: number;
-  max_sales: number | null;
+  share: number;
+  baseline_share: number;
+  min_percentile: number;
 }
 
 export interface GenreSuccess {
   genre: string;
   games_in_genre: number;
   games_scored: number;
-  games_without_reviews: number;
-  multiplier: number;
-  formula: string;
+  games_excluded_unreleased: number;
+  games_excluded_no_reviews: number;
+  measure: string;
+  cohort: string;
   method: string;
-  source: string;
-  tiers: SuccessTierPoint[];
+  notes: string;
+  bands: SuccessBandPoint[];
 }
 
 async function fetchGenreSuccess(genre: string): Promise<GenreSuccess> {
@@ -35,21 +37,30 @@ async function fetchGenreSuccess(genre: string): Promise<GenreSuccess> {
   return res.json();
 }
 
-/** Tier → semantic status colour, so the pie reads the same way the
+/** Best band → best status colour, so the pie reads top-to-bottom the way the
  *  Confirmed/Estimated/Unknown badges elsewhere do. */
-function tierColors(tokens: ReturnType<typeof useChartTokens>): Record<string, string> {
+function bandColors(tokens: ReturnType<typeof useChartTokens>): Record<string, string> {
   return {
-    breakout_hit: tokens.statusGood,
-    solid: tokens.series1,
-    modest: tokens.statusWarn,
-    underperformed: tokens.statusCritical,
+    top_1: tokens.statusGood,
+    top_10: tokens.series1,
+    top_25: tokens.series2,
+    upper_half: tokens.ink2,
+    lower_half: tokens.muted,
   };
 }
 
-function salesRange(tier: SuccessTierPoint): string {
-  if (tier.max_sales === null) return `${fmtInt(tier.min_sales)}+ est. sales`;
-  if (tier.min_sales === 0) return `under ${fmtInt(tier.max_sales)} est. sales`;
-  return `${fmtInt(tier.min_sales)}–${fmtInt(tier.max_sales)} est. sales`;
+/** The one sentence worth reading: how this genre's top decile compares with
+ *  what an average genre would show. Null when the band is empty — no claim. */
+function headline(data: GenreSuccess): string | null {
+  const band = data.bands.find((b) => b.key === "top_10");
+  if (!band || band.count === 0 || !band.baseline_share) return null;
+  const ratio = band.share / band.baseline_share;
+  const pct = (band.share * 100).toFixed(1);
+  if (ratio >= 1.15)
+    return `${pct}% of ranked ${data.genre} games land in the top 10% — ${ratio.toFixed(1)}× the catalogue average.`;
+  if (ratio <= 0.85)
+    return `${pct}% of ranked ${data.genre} games land in the top 10% — ${ratio.toFixed(1)}× the catalogue average, below par.`;
+  return `${pct}% of ranked ${data.genre} games land in the top 10% — about the catalogue average.`;
 }
 
 export function GenreSuccessPie({
@@ -65,13 +76,14 @@ export function GenreSuccessPie({
     queryFn: () => fetchGenreSuccess(genre),
   });
 
-  const colors = tierColors(tokens);
+  const colors = bandColors(tokens);
+  const line = data ? headline(data) : null;
 
   return (
     <Card className="p-4">
       <div className="mb-2 flex items-start justify-between gap-2">
         <h3 className="text-sm font-medium text-ink2">
-          Estimated success — {genre}
+          {genre} — standing among 2026 indies
         </h3>
         <button
           onClick={onClose}
@@ -90,16 +102,17 @@ export function GenreSuccessPie({
         </p>
       ) : data.games_scored === 0 ? (
         <p className="py-8 text-center text-sm text-muted">
-          None of the {fmtInt(data.games_in_genre)} {genre} games has a review
-          count yet, so there is nothing to estimate from.
+          None of the {fmtInt(data.games_in_genre)} {genre} games can be ranked
+          yet — they are unreleased or have no reviews.
         </p>
       ) : (
         <>
+          {line ? <p className="mb-1 text-sm text-ink">{line}</p> : null}
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={data.tiers.filter((t) => t.count > 0)}
+                  data={data.bands.filter((b) => b.count > 0)}
                   dataKey="count"
                   nameKey="label"
                   innerRadius={38}
@@ -107,18 +120,18 @@ export function GenreSuccessPie({
                   paddingAngle={2}
                   stroke={tokens.surface}
                 >
-                  {data.tiers
-                    .filter((t) => t.count > 0)
-                    .map((tier) => (
-                      <Cell key={tier.key} fill={colors[tier.key] ?? tokens.muted} />
+                  {data.bands
+                    .filter((b) => b.count > 0)
+                    .map((band) => (
+                      <Cell key={band.key} fill={colors[band.key] ?? tokens.muted} />
                     ))}
                 </Pie>
                 <Tooltip
                   formatter={(value, _name, entry) => {
-                    const tier = entry?.payload as SuccessTierPoint;
+                    const band = entry?.payload as SuccessBandPoint;
                     return [
-                      `${fmtInt(Number(value))} games — ${salesRange(tier)}`,
-                      tier.label,
+                      `${fmtInt(Number(value))} games — ${(band.share * 100).toFixed(1)}% of ranked (average genre: ${(band.baseline_share * 100).toFixed(0)}%)`,
+                      band.label,
                     ];
                   }}
                   contentStyle={{
@@ -134,26 +147,21 @@ export function GenreSuccessPie({
           </div>
 
           {/* Same spirit as the header's "Steam never exposes wishlists" note:
-              say what the number is before someone treats it as a fact. */}
+              say exactly what the number is, and what it leaves out. */}
           <p className="mt-2 text-xs leading-relaxed text-muted">
-            <span className="font-medium text-ink2">Estimated, not confirmed.</span>{" "}
-            Steam publishes no sales figures. These tiers apply the Boxleiter
-            method — <code>{data.formula}</code> with multiplier{" "}
-            <span className="tabular-nums">{data.multiplier}</span> — to each
-            game&apos;s latest review count. The real ratio varies by price,
-            genre and age, so treat this as an order of magnitude.{" "}
-            <span title={data.source} className="underline decoration-dotted">
-              Source
+            <span className="font-medium text-ink2">Measured, not estimated.</span>{" "}
+            Steam publishes no sales figures, so games are ranked by their
+            published review count against other 2026 indies released the{" "}
+            <span title="A game out for three weeks has had three weeks to collect reviews — comparing it against January releases would bury it for no reason.">
+              same month
             </span>
-            .
+            . No sales number is derived, so no multiplier is involved.
           </p>
           <p className="mt-1 text-xs text-muted">
             {fmtInt(data.games_scored)} of {fmtInt(data.games_in_genre)} {genre}{" "}
-            games scored;{" "}
-            <span title="No review count yet — excluded rather than guessed into a tier">
-              {fmtInt(data.games_without_reviews)} excluded for having no reviews
-            </span>
-            .
+            games ranked; {fmtInt(data.games_excluded_unreleased)} unreleased and{" "}
+            {fmtInt(data.games_excluded_no_reviews)} with no reviews yet are left
+            out rather than placed in a band.
           </p>
         </>
       )}

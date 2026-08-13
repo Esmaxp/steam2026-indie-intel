@@ -23,30 +23,31 @@ class ChartsOut(BaseModel):
     top_genres: list[BreakdownPoint]
 
 
-class SuccessTierPoint(BaseModel):
+class SuccessBandPoint(BaseModel):
     key: str
     label: str
     count: int
-    min_sales: int
-    max_sales: int | None  # None = open-ended top tier
+    share: float           # count / games_scored
+    baseline_share: float  # what an average genre would show — true by construction
+    min_percentile: float
 
 
 class GenreSuccessOut(BaseModel):
-    """Estimated success spread for one genre — a heuristic, never a fact.
+    """Where one genre's games sit among their release-month peers.
 
-    The formula, the multiplier actually used and its source travel with the
-    numbers so the reader can recompute or discount them, the same way budget
-    and revenue estimates carry their inputs. Games with no review count are
-    reported in `games_without_reviews` and left out of the tiers rather than
-    guessed into one.
+    A ranking of a measured value (Steam's own review count), not an estimate:
+    no sales figure is derived, so there is no multiplier to disagree with.
+    Games that cannot be ranked are counted in the two exclusion fields rather
+    than placed in a band.
     """
 
     genre: str
     games_in_genre: int
     games_scored: int
-    games_without_reviews: int
-    multiplier: float
-    formula: str
+    games_excluded_unreleased: int
+    games_excluded_no_reviews: int
+    measure: str
+    cohort: str
     method: str
-    source: str
-    tiers: list[SuccessTierPoint]
+    notes: str
+    bands: list[SuccessBandPoint]

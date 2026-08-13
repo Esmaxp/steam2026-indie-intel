@@ -197,7 +197,7 @@ export function AnalyticsCharts() {
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Top genres (click a bar for its success spread)">
+      <ChartCard title="Top genres (click a bar to rank its games)">
         <SimpleBreakdown
           data={data.top_genres}
           onSelect={(key) => setGenre((current) => (current === key ? null : key))}
