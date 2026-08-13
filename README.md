@@ -243,11 +243,33 @@ payload.
 |---|---|
 | `GET /market/manifest` | What this tool can and cannot tell you. Call first. |
 | `GET /market/coverage` | Which signals exist right now, and how densely. |
-| `GET /market/trending` | Breakouts by measured movement — or current demand leaders when nothing has moved yet. Check `basis`. |
+| `GET /market/trending?segment=released` | Released games gaining traction fastest: `reviews_per_day x wilson_lower_bound(positive rate)`. |
+| `GET /market/trending?segment=upcoming` | Pre-release demand: Valve's Top-Wishlists chart order, then remaining games by followers. Check `basis`. |
 | `GET /market/genres` | Supply, outcome and demand per Steam genre. |
 | `GET /market/tags` | The same per tag — 429 of them, the vocabulary that actually describes a game. |
 | `GET /market/design-attributes?axis=` | How a design or commercial choice performed: `dimension`, `camera`, `graphics_style`, `engine`, `price_band`, `early_access`, `demo_available`. |
 | `GET /market/landscape?tag=&genre=` | The competitive field for a concept: size, outcomes, direct competitors, adjacent tags. Filters are ANDed. |
+
+### Trending is two algorithms, not one
+
+`segment` is required, because released and upcoming games emit different
+signals and a blended list would be meaningless.
+
+**Released** — `reviews_per_day x wilson_lower_bound(positive rate)`. Sorting
+on review count alone returns the same biggest games forever, so the divisor is
+days on sale (plus a 7-day smoothing term, or a launch-day game with 20 reviews
+reads as 20/day). The Wilson term is what stops velocity deciding it alone: a
+game pulling 2,400 reviews a day at 49% positive scores below one doing 2,100 a
+day at 97%. It also handles small samples — 5 reviews at 100% scores ~0.48, well
+under 2,000 reviews at 92%.
+
+**Upcoming** — an unreleased game has no reviews. Valve's Top-Wishlists chart is
+the only first-party wishlist signal that exists, so the 1,189 charted games
+come first in chart order and the rest follow by follower count. Two tiers
+rather than a blended score: converting a chart position into a follower-
+equivalent needs an exchange rate nobody has validated. **Rank is a position,
+never a count** — this dataset holds no wishlist number for any game except the
+427 whose developers stated one publicly.
 
 Three properties are deliberate, and they exist because the consumer is an
 agent optimising for a confident answer:

@@ -119,6 +119,14 @@ async def manifest(db: AsyncSession = Depends(get_db)) -> ManifestOut:
             "all of Steam are on it; 'not ranked' is the normal case.",
             "rank_delta_7d": "Chart positions gained since the newest complete sweep at "
             "least 7 days old. Positive = moved up.",
+            "reviews_per_day": "Total reviews over days on sale, plus a 7-day smoothing "
+            "term. A lifetime average, not current velocity — only 1,533 of 23,076 games "
+            "have two stats snapshots, so a measured recent rate does not exist yet.",
+            "quality": "Wilson lower bound of the positive rate at 95%. Combines how "
+            "positive with how certain: 5 reviews at 100% scores ~0.48, below 2,000 at 92%.",
+            "score": "The released trending rank: reviews_per_day x quality. Velocity "
+            "discounted by reception, so a fast but badly received game does not read as "
+            "a success.",
             "median_price_cents": "Median current price of games in the facet, in cents.",
             "top_decile_share": "Share of the facet's RANKABLE games in the top decile of "
             "their release-month cohort. Denominator excludes unreleased games and games "
@@ -130,8 +138,14 @@ async def manifest(db: AsyncSession = Depends(get_db)) -> ManifestOut:
                 "use_when": "Before trusting any thin result. Says which signals exist.",
             },
             {
-                "path": "/api/v1/market/trending",
-                "use_when": "Finding breakouts and current demand leaders. Check `basis`.",
+                "path": "/api/v1/market/trending?segment=released",
+                "use_when": "Released games gaining traction fastest: reviews per day "
+                "weighted by the Wilson lower bound of the positive rate.",
+            },
+            {
+                "path": "/api/v1/market/trending?segment=upcoming",
+                "use_when": "Pre-release demand: Valve's Top-Wishlists chart order, then "
+                "remaining games by followers. Check `basis` before calling it 'rising'.",
             },
             {
                 "path": "/api/v1/market/genres",
@@ -190,22 +204,41 @@ async def coverage(db: AsyncSession = Depends(get_db)) -> CoverageOut:
 @router.get("/trending", response_model=TrendingOut)
 async def trending(
     db: AsyncSession = Depends(get_db),
+    segment: str = Query(
+        ...,
+        pattern="^(released|upcoming)$",
+        description="Which market to rank. Required, because the two are ranked by "
+        "different algorithms and a blended list would be meaningless.",
+    ),
     limit: int = Query(25, ge=1, le=100),
-    release_status: str | None = RELEASE_STATUS,
     genre: str | None = Query(None, description="Restrict to one genre, case-insensitive"),
     tag: str | None = Query(None, description="Restrict to one Steam tag, case-insensitive"),
 ) -> TrendingOut:
-    """Games with the strongest demand movement, or — when no movement can be
-    measured yet — the current demand leaders.
+    """Games gaining traction, ranked by the signals their segment actually has.
 
-    `basis` distinguishes the two. Do not describe a `current_standing` list as
-    "trending": those are the biggest games in the slice, not the fastest
-    growing, and a concept pitched off that confusion is chasing incumbents.
+    **released** — `reviews_per_day x wilson_lower_bound(positive rate)`.
+    Velocity rather than total, so a leaderboard of the biggest games does not
+    crowd out what is moving; multiplied by the lower bound of the positive
+    rate so a fast-but-poorly-received game does not read as a success and a
+    5-review game cannot beat a 2,000-review one.
+
+    **upcoming** — Valve's Top-Wishlists chart order, then remaining games by
+    followers. An unreleased game has no reviews; the chart is the only
+    first-party wishlist signal that exists. It is a POSITION, not a count, and
+    nothing here converts it into one.
+
+    `algorithm` restates the ranking in the payload, so a consumer that only
+    ever sees JSON knows what it is reading.
     """
     await _reject_unknown(db, [genre] if genre else [], [tag] if tag else [])
-    result = await market.trending(db, limit, release_status, genre, tag)
+    if segment == "released":
+        result = await market.trending_released(db, limit, genre, tag)
+    else:
+        result = await market.trending_upcoming(db, limit, genre, tag)
     return TrendingOut(
-        basis=result["basis"],
+        segment=result["segment"],
+        algorithm=result["algorithm"],
+        basis=result.get("basis"),
         items=result["items"],
         coverage=CoverageOut(**await market.coverage(db)),
     )

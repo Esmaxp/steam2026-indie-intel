@@ -64,30 +64,62 @@ class FacetOut(BaseModel):
 
 
 class TrendingItem(BaseModel):
+    """One ranked game. Which fields are populated depends on the segment —
+    a released game has reviews and no chart position; an upcoming one has the
+    reverse."""
+
     appid: int
     name: str
     release_date: datetime.date | None
     is_released: bool
     price_cents: int | None
-    followers: int | None
-    follower_delta_14d: int | None
-    wishlist_rank: int | None
+
+    # --- released segment ---
+    total_reviews: int | None = None
+    positive_reviews: int | None = None
+    positive_pct: float | None = None
+    peak_ccu: int | None = None
+    days_on_sale: int | None = None
+    reviews_per_day: float | None = Field(
+        default=None,
+        description="Lifetime average, not current velocity: total reviews over days "
+        "on sale (plus a 7-day smoothing term so a launch-week game is not divided by "
+        "one noisy day). Measured recent velocity does not exist for this catalogue.",
+    )
+    quality: float | None = Field(
+        default=None,
+        description="Wilson lower bound of the positive rate at 95%. Discounts small "
+        "samples: 5 reviews at 100% scores about 0.48.",
+    )
+    score: float | None = Field(
+        default=None, description="reviews_per_day x quality. The released ranking."
+    )
+
+    # --- upcoming segment ---
+    wishlist_rank: int | None = None
     rank_delta_7d: int | None = Field(
         default=None, description="Chart positions gained. Positive = moved up."
     )
-    total_reviews: int | None
-    positive_pct: float | None
-    signals: list[str] = Field(
-        description="Which measured signals are positive for this game. Empty when "
-        "the list is ranked by current standing rather than movement."
+    followers: int | None = None
+    follower_delta_14d: int | None = None
+    rank_basis: str | None = Field(
+        default=None,
+        description="'wishlist_chart' = ranked by Valve's chart position. 'followers' "
+        "= not on the chart, ranked by community-hub followers instead.",
     )
 
 
 class TrendingOut(BaseModel):
-    basis: str = Field(
-        description="'movement' = ranked by measured change over time. "
-        "'current_standing' = nothing has moved measurably yet, so these are the "
-        "current demand leaders. Do not call a current_standing list 'trending'."
+    segment: str
+    algorithm: str = Field(
+        description="The ranking, restated in the payload so a consumer that only "
+        "sees JSON knows what produced the order."
+    )
+    basis: str | None = Field(
+        default=None,
+        description="Upcoming only. 'chart_movement' = ranked by measured chart "
+        "climbing. 'chart_position' = nothing has moved measurably yet, so this is "
+        "current standing. Do not describe a chart_position list as 'rising'.",
     )
     items: list[TrendingItem]
     coverage: CoverageOut

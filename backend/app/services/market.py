@@ -18,6 +18,8 @@ aggregate reports how many games in scope actually carried the signal it used,
 so the agent can tell those apart instead of inferring a quiet market.
 """
 
+import math
+
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -188,28 +190,177 @@ def _scope(release_status: str | None, genre: str | None, tag: str | None):
     return conds
 
 
-async def trending(
-    db: AsyncSession,
-    limit: int,
-    release_status: str | None,
-    genre: str | None,
-    tag: str | None,
-) -> dict:
-    """Games with the strongest recent demand movement.
+# --- Trending -------------------------------------------------------------
+#
+# Released and upcoming games are ranked by different algorithms because they
+# emit different signals. A released game has reviews; an unreleased one has
+# none by definition, and its only first-party demand signals are Valve's
+# Top-Wishlists position and community-hub followers.
+#
+# The previous single ranking added follower_delta to rank_delta, which summed
+# people and chart positions as though they were the same unit.
 
-    Momentum needs two observations separated by time. Where that does not
-    exist yet the games are ranked by current standing instead — a point-in-
-    time signal — and `basis` says which of the two produced the list, because
-    "rising fast" and "currently big" are different claims and an agent
-    building a concept off the wrong one would be misled.
+# Wilson score interval, 95% (z = 1.96). Turns "how positive" into "how
+# positive, discounted by how sure we are" — 5 reviews all positive scores
+# ~0.48, not 1.0, so it cannot outrank 2,000 reviews at 92%.
+WILSON_Z = 1.96
+# Added to a game's age before dividing. Without it a game released yesterday
+# with 20 reviews reads as 20 reviews/day and tops the chart on one day of
+# noise; with it, 2.5/day.
+SMOOTHING_DAYS = 7
+
+
+def wilson_lower_bound(positive: int, total: int, z: float = WILSON_Z) -> float:
+    """Lower bound of the 95% confidence interval on the positive rate.
+
+    Python twin of the SQL in `_wilson_sql`. Ranking happens in the database —
+    it is over 12,053 games and only the top N are returned — so the formula
+    exists twice on purpose. Both are driven by WILSON_Z, and the tests pin
+    this one's numbers.
+    """
+    if total <= 0:
+        return 0.0
+    p = positive / total
+    denominator = 1 + z * z / total
+    centre = p + z * z / (2 * total)
+    margin = z * math.sqrt((p * (1 - p) + z * z / (4 * total)) / total)
+    return max(0.0, (centre - margin) / denominator)
+
+
+def _wilson_sql(positive, total):
+    """The same interval as a SQL expression, for ORDER BY."""
+    n = sa.cast(sa.func.nullif(total, 0), sa.Float)
+    p = sa.cast(positive, sa.Float) / n
+    z = WILSON_Z
+    centre = p + z * z / (2 * n)
+    margin = z * sa.func.sqrt((p * (1 - p) + z * z / (4 * n)) / n)
+    return (centre - margin) / (1 + z * z / n)
+
+
+def _days_on_sale_sql():
+    """Days since release, floored at 1 so a launch-day game is not divided by
+    zero. Every game in this catalogue is a 2026 release, so this is a real
+    age rather than a decade of accumulated back-catalogue."""
+    return sa.func.greatest(1, sa.func.current_date() - Game.release_date)
+
+
+async def trending_released(
+    db: AsyncSession, limit: int, genre: str | None, tag: str | None
+) -> dict:
+    """Released games gaining traction fastest, weighted by reception.
+
+        score = reviews_per_day x wilson_lower_bound(positive rate)
+
+    Sorting on review COUNT alone would return the same handful of biggest
+    games forever — that is a leaderboard, not a trend. Dividing by days on
+    sale asks how fast a game is accumulating reviews rather than how many it
+    has ever had, which is what makes a three-week-old game visible next to a
+    seven-month-old one.
+
+    The Wilson term is what stops velocity alone deciding it. A game pulling
+    500 reviews a day at 40% positive is moving, but it is not a signal worth
+    building a concept on; multiplying by the lower bound of its positive rate
+    discounts it to the level of a slower, well-received game. The bound also
+    handles small samples: 5 reviews at 100% scores below 2,000 at 92%.
+
+    `reviews_per_day` is a lifetime average, not current velocity. Only 1,533
+    of 23,076 games have two stats snapshots, so a measured recent rate does
+    not exist for the catalogue yet.
+    """
+    ls = latest_stats_sq()
+    conds = [Game.is_released.is_(True), Game.release_date.is_not(None)]
+    conds += _scope(None, genre, tag)
+
+    days = _days_on_sale_sql()
+    per_day = sa.cast(ls.c.total_reviews, sa.Float) / (days + SMOOTHING_DAYS)
+    quality = _wilson_sql(ls.c.positive_reviews, ls.c.total_reviews)
+    score = (per_day * quality).label("score")
+
+    rows = (
+        await db.execute(
+            sa.select(
+                Game.appid,
+                Game.name,
+                Game.release_date,
+                Game.current_price_cents,
+                ls.c.total_reviews,
+                ls.c.positive_reviews,
+                ls.c.positive_pct,
+                ls.c.peak_ccu,
+                days.label("days_on_sale"),
+                per_day.label("reviews_per_day"),
+                quality.label("quality"),
+                score,
+            )
+            .select_from(Game)
+            .join(ls, ls.c.appid == Game.appid)
+            .where(
+                *conds,
+                ls.c.total_reviews.is_not(None),
+                ls.c.total_reviews > 0,
+                ls.c.positive_reviews.is_not(None),
+            )
+            .order_by(score.desc())
+            .limit(limit)
+        )
+    ).all()
+
+    return {
+        "segment": "released",
+        "algorithm": (
+            "reviews_per_day x wilson_lower_bound(positive rate). Velocity, "
+            "discounted by how well received and how certain that reception is. "
+            "reviews_per_day is a lifetime average — measured recent velocity "
+            "does not exist for this catalogue yet."
+        ),
+        "items": [
+            {
+                "appid": r.appid,
+                "name": r.name,
+                "release_date": r.release_date,
+                "is_released": True,
+                "price_cents": r.current_price_cents,
+                "total_reviews": r.total_reviews,
+                "positive_reviews": r.positive_reviews,
+                "positive_pct": float(r.positive_pct) if r.positive_pct is not None else None,
+                "peak_ccu": r.peak_ccu,
+                "days_on_sale": r.days_on_sale,
+                "reviews_per_day": round(float(r.reviews_per_day), 3),
+                "quality": round(float(r.quality), 4),
+                "score": round(float(r.score), 4),
+            }
+            for r in rows
+        ],
+    }
+
+
+async def trending_upcoming(
+    db: AsyncSession, limit: int, genre: str | None, tag: str | None
+) -> dict:
+    """Unreleased games by wishlist demand.
+
+    An unreleased game has no reviews, so the released algorithm has nothing to
+    work with. What Steam does expose is Valve's Top-Wishlists chart, which is
+    ordered by wishlists blended with recent velocity — the closest thing to a
+    wishlist signal that exists first-party.
+
+    **It is a position, not a count.** This project holds no wishlist number
+    for any game except the 427 whose developers stated one publicly, and it
+    will not derive one from rank or followers. So the ranking is the chart's
+    own order, not a modelled quantity.
+
+    Two tiers rather than one blended score: the 1,189 games on the chart come
+    first in chart order, then the rest by follower count. Blending a rank with
+    a follower count would need an exchange rate between them that nobody has
+    validated — precisely the modelling this project refuses. `rank_basis` says
+    which tier a game came from.
     """
     lf, pf = latest_followers_sq(), prior_followers_sq()
     lr, pr = latest_rank_sq(), prior_rank_sq()
-    ls = latest_stats_sq()
-    conds = _scope(release_status, genre, tag)
+    conds = [Game.is_released.is_(False)]
+    conds += _scope(None, genre, tag)
 
     follower_delta = (lf.c.followers - pf.c.followers).label("follower_delta")
-    # Rank improves as the number falls, so prior minus latest is the gain.
     rank_delta = (pr.c.rank - lr.c.rank).label("rank_delta")
 
     stmt = (
@@ -217,70 +368,68 @@ async def trending(
             Game.appid,
             Game.name,
             Game.release_date,
-            Game.is_released,
             Game.current_price_cents,
-            lf.c.followers,
-            follower_delta,
             lr.c.rank.label("wishlist_rank"),
             rank_delta,
-            ls.c.total_reviews,
-            ls.c.positive_pct,
+            lf.c.followers,
+            follower_delta,
         )
         .select_from(Game)
-        .outerjoin(lf, lf.c.appid == Game.appid)
-        .outerjoin(pf, pf.c.appid == Game.appid)
         .outerjoin(lr, lr.c.appid == Game.appid)
         .outerjoin(pr, pr.c.appid == Game.appid)
-        .outerjoin(ls, ls.c.appid == Game.appid)
+        .outerjoin(lf, lf.c.appid == Game.appid)
+        .outerjoin(pf, pf.c.appid == Game.appid)
+        .where(*conds, sa.or_(lr.c.rank.is_not(None), lf.c.followers.is_not(None)))
     )
-    if conds:
-        stmt = stmt.where(*conds)
 
-    movers = sa.or_(follower_delta.is_not(None), rank_delta.is_not(None))
-    measured = (await db.execute(
-        sa.select(sa.func.count()).select_from(stmt.where(movers).subquery())
-    )).scalar_one()
+    moved = (
+        await db.execute(
+            sa.select(sa.func.count()).select_from(
+                stmt.where(rank_delta.is_not(None)).subquery()
+            )
+        )
+    ).scalar_one()
 
-    if measured:
-        basis = "movement"
-        ordered = stmt.where(movers).order_by(
-            sa.desc(sa.func.coalesce(follower_delta, 0) + sa.func.coalesce(rank_delta, 0))
+    if moved:
+        # Chart movement is the real demand momentum signal: a game climbing
+        # the Top-Wishlists chart is gaining wishlists faster than the games
+        # around it.
+        basis = "chart_movement"
+        ordered = stmt.order_by(
+            sa.desc(sa.func.coalesce(rank_delta, -(10**9))),
+            sa.asc(sa.func.coalesce(lr.c.rank, 10**9)),
         )
     else:
-        # Nothing has moved measurably yet. Fall back to current standing and
-        # label it, rather than return an empty list that reads as a flat market.
-        basis = "current_standing"
-        ordered = stmt.where(
-            sa.or_(lf.c.followers.is_not(None), lr.c.rank.is_not(None))
-        ).order_by(
+        basis = "chart_position"
+        ordered = stmt.order_by(
+            # Charted games first, in chart order; then everything else by
+            # followers. NULLS LAST on the rank does this in one clause.
             sa.asc(sa.func.coalesce(lr.c.rank, 10**9)),
             sa.desc(sa.func.coalesce(lf.c.followers, 0)),
         )
 
     rows = (await db.execute(ordered.limit(limit))).all()
     return {
+        "segment": "upcoming",
         "basis": basis,
+        "algorithm": (
+            "Valve's Top-Wishlists chart order for the games on it, then "
+            "remaining games by community-hub followers. Rank is an ORDER "
+            "blending total wishlists with velocity, never a count — this "
+            "dataset holds no wishlist number except developer disclosures."
+        ),
         "items": [
             {
                 "appid": r.appid,
                 "name": r.name,
                 "release_date": r.release_date,
-                "is_released": r.is_released,
+                "is_released": False,
                 "price_cents": r.current_price_cents,
-                "followers": r.followers,
-                "follower_delta_14d": r.follower_delta,
                 "wishlist_rank": r.wishlist_rank,
                 "rank_delta_7d": r.rank_delta,
-                "total_reviews": r.total_reviews,
-                "positive_pct": float(r.positive_pct) if r.positive_pct is not None else None,
-                "signals": [
-                    name
-                    for name, value in (
-                        ("follower_growth", r.follower_delta),
-                        ("rank_improvement", r.rank_delta),
-                    )
-                    if value is not None and value > 0
-                ],
+                "followers": r.followers,
+                "follower_delta_14d": r.follower_delta,
+                "rank_basis": "wishlist_chart" if r.wishlist_rank else "followers",
             }
             for r in rows
         ],

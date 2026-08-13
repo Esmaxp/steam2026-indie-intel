@@ -110,3 +110,45 @@ def _row(*, games: int, ranked_sample: int, top_decile: int | None):
     row.ranked_sample = ranked_sample
     row.top_decile = top_decile
     return row
+
+
+# --- trending ranking ------------------------------------------------------
+#
+# The released ranking multiplies velocity by a Wilson lower bound. Both terms
+# earn their place, and these pin why: without the divisor the list is a
+# leaderboard of the biggest games, and without the bound a fast, badly
+# received game outranks a slower, well-received one.
+
+
+def test_wilson_discounts_a_tiny_sample_far_below_its_raw_rate():
+    """5 reviews, all positive, is not evidence of a 100% game."""
+    assert market.wilson_lower_bound(5, 5) < 0.6
+    assert market.wilson_lower_bound(5, 5) > 0.4
+
+
+def test_wilson_lets_a_large_sample_keep_almost_all_of_its_rate():
+    assert market.wilson_lower_bound(1840, 2000) > 0.90  # 92% raw
+
+
+def test_a_perfect_tiny_sample_cannot_outrank_a_large_strong_one():
+    """The ordering this protects: a 5-review game must not head the trending
+    list ahead of a 2,000-review game at 92%."""
+    assert market.wilson_lower_bound(5, 5) < market.wilson_lower_bound(1840, 2000)
+
+
+def test_wilson_is_zero_when_there_is_nothing_to_measure():
+    assert market.wilson_lower_bound(0, 0) == 0.0
+
+
+def test_wilson_punishes_a_poorly_received_game():
+    """~50% positive should roughly halve a game's velocity, which is what
+    keeps a fast but disliked launch off the top of the list."""
+    assert 0.45 < market.wilson_lower_bound(500, 1000) < 0.53
+
+
+def test_smoothing_stops_a_launch_day_game_dominating_on_one_day_of_noise():
+    """20 reviews on day one is 20/day undivided — enough to outrank a game
+    doing 15/day sustained. The smoothing term makes it 2.5."""
+    raw = 20 / 1
+    smoothed = 20 / (1 + market.SMOOTHING_DAYS)
+    assert raw > 15 > smoothed
