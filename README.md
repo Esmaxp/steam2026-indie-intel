@@ -196,9 +196,12 @@ a full-catalogue follower sweep is ~18h at 4s per game, disclosures ~8h at
 **Continue** resumes it; **Stop** ends the run. Every collector is resumable,
 so none of the three loses work.
 
-A run that finished, failed, was stopped, or died with the backend gets a
-**Continue** button too, which starts a new job with the same settings from
-where the old one stopped. The original row is kept as the record of what
+A run that finished, failed, was stopped, or died with the backend gets
+**Continue** and **Delete** buttons. Continue starts a new job with the same
+settings from where the old one stopped. Delete removes the record so it
+cannot be re-run — it takes two clicks, and it removes only the record:
+follower snapshots, disclosures and chart entries are keyed by game and are
+untouched. A live run is refused rather than deleted; stop it first. The original row is kept as the record of what
 happened rather than being revived. Followers and rank work out where to
 resume from the database; disclosures cannot — it writes rows only for the
 ~5% of games that announced a figure, so "already scanned" leaves no trace for

@@ -5,11 +5,12 @@
  *  admin authentication, so this page is open to anyone who can reach it. */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Pause, Play, RotateCw, Square } from "lucide-react";
+import { Loader2, Pause, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import {
   cancelSweep,
+  deleteSweep,
   fetchSummary,
   fetchSweeps,
   pauseSweep,
@@ -292,6 +293,18 @@ export default function SweepsAdminPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] }),
   });
 
+  // Two-step, because one misclick on a disclosures run throws away the walk
+  // position its Continue depends on. The armed id is held rather than a
+  // boolean, so arming one card disarms any other.
+  const [armedDelete, setArmedDelete] = useState<number | null>(null);
+  const remove = useMutation({
+    mutationFn: (id: number) => deleteSweep(id),
+    onSettled: () => {
+      setArmedDelete(null);
+      queryClient.invalidateQueries({ queryKey: ["admin-sweeps"] });
+    },
+  });
+
   const live = (data ?? []).filter((job) => ACTIVE.has(job.status));
   /** Which collector each live sweep is occupying. One sweep per collector,
    *  not one overall: each talks to a different Steam host, so followers and
@@ -494,6 +507,7 @@ export default function SweepsAdminPage() {
                     </Button>
                   </>
                 ) : TERMINAL.has(job.status) ? (
+                  <>
                   <Button
                     onClick={() => rerun.mutate(job.id)}
                     // Same one-at-a-time rule as the Run button: a second
@@ -514,6 +528,30 @@ export default function SweepsAdminPage() {
                     <RotateCw size={11} aria-hidden />
                     {job.status === "done" ? "Run again" : "Continue"}
                   </Button>
+                  <Button
+                    onClick={() =>
+                      armedDelete === job.id
+                        ? remove.mutate(job.id)
+                        : setArmedDelete(job.id)
+                    }
+                    onBlur={() =>
+                      setArmedDelete((id) => (id === job.id ? null : id))
+                    }
+                    disabled={remove.isPending}
+                    title={
+                      "Removes this run from the list so it cannot be re-run. " +
+                      "Collected data is keyed by game and is not deleted."
+                    }
+                    className={
+                      armedDelete === job.id
+                        ? "h-7 gap-1.5 px-2 text-xs border-status-critical/50 text-status-critical"
+                        : "h-7 gap-1.5 px-2 text-xs"
+                    }
+                  >
+                    <Trash2 size={11} aria-hidden />
+                    {armedDelete === job.id ? "Confirm delete" : "Delete"}
+                  </Button>
+                  </>
                 ) : null}
               </div>
 
@@ -592,6 +630,11 @@ export default function SweepsAdminPage() {
                 <p className="mt-2 text-xs text-muted">
                   Continuing an earlier run — skips ahead to appid{" "}
                   {fmtInt(job.start_appid)}.
+                </p>
+              ) : null}
+              {remove.isError ? (
+                <p className="mt-2 text-xs text-status-critical">
+                  {(remove.error as Error).message}
                 </p>
               ) : null}
               {rerun.isError ? (

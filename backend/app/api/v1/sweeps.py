@@ -295,3 +295,32 @@ async def cancel_sweep(job_id: int, db: AsyncSession = Depends(get_db)) -> Sweep
     await db.commit()
     await db.refresh(job)
     return _out(job)
+
+
+@router.delete("/sweeps/{job_id}", status_code=204)
+async def delete_sweep(job_id: int, db: AsyncSession = Depends(get_db)) -> None:
+    """Remove a finished run from the list, so it cannot be re-run by mistake.
+
+    Only the RECORD goes. Everything the run collected — follower snapshots,
+    wishlist disclosures, chart entries — lives in its own table keyed by
+    appid and is untouched.
+
+    A live run is refused rather than deleted. job_control reads a missing row
+    as a cancellation, so deleting one would stop a CLI sweep from a button
+    labelled Delete — a side effect nobody would predict from the name. Stop
+    it first, then delete.
+
+    What IS lost is the walk position: a disclosures run records how far
+    through the catalogue it got, and Continue reads it from this row. Delete
+    the row and that continuation has to start over.
+    """
+    job = await db.get(SweepJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+    if job.status not in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sweep {job_id} is {job.status} — stop it before deleting.",
+        )
+    await db.delete(job)
+    await db.commit()

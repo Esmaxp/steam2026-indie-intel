@@ -147,3 +147,14 @@ export function resumeSweep(id: number) {
 export function rerunSweep(id: number) {
   return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/rerun`, {});
 }
+
+/** Remove a finished run's record. Collected data is keyed by appid in its own
+ *  tables and is not touched. */
+export async function deleteSweep(id: number) {
+  const res = await fetch(`${API_BASE}/api/v1/admin/sweeps/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    throw new Error((await res.json().catch(() => null))?.detail ?? `API ${res.status}`);
+  }
+}
