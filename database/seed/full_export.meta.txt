@@ -1,7 +1,7 @@
-exported_at: 2026-08-12T10:25:39Z
-games_rows: 14208
-alembic_revision: 0010 (head)
-dump_size: 13M
+exported_at: 2026-08-13T09:27:51Z
+games_rows: 23078
+alembic_revision: 0011 (head)
+dump_size: 22M
 restore: docker compose run --rm db_restore
 then:    docker compose run --rm backend alembic upgrade head
 note: prices/reviews/estimates are only as fresh as exported_at; run
