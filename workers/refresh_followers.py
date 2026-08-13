@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import datetime
 import os
+import time
 from collections.abc import Awaitable, Callable
 
 import sqlalchemy as sa
@@ -117,6 +118,13 @@ async def run(
     )
 
     written = no_group = failed = 0
+    # Timed by the process doing the work, because it is the only thing that
+    # knows how long a game actually took. Anything inferred from the rows it
+    # writes has to divide by the share of games that have a hub, and that
+    # share is a small noisy sample early in a run.
+    started = time.monotonic()
+    parked = 0.0
+
     async with make_session() as http:
         client = SteamClient(http, min_interval=interval)
         async with async_session_factory() as db:
@@ -159,6 +167,9 @@ async def run(
                     if on_progress is not None:
                         await on_progress({
                             "total": len(appids), "processed": index,
+                            # Seconds of actual work, so the ETA is
+                            # elapsed/processed rather than an inference.
+                            "elapsed": round(time.monotonic() - started - parked, 1),
                             # Reported so the ETA can count remaining work over
                             # the same slice of the catalogue this run covers,
                             # rather than assuming the whole thing.
@@ -166,14 +177,24 @@ async def run(
                             "written": written, "no_group": no_group, "failed": failed,
                         })
                 # Checked between games so a stop lands within one interval
-                # rather than at the end of a multi-hour run.
-                if should_stop is not None and await should_stop():
+                # rather than at the end of a multi-hour run. should_stop also
+                # blocks for the whole of a pause, so timing the call is
+                # exactly the parked duration — without subtracting it a
+                # resumed run reads as permanently slower than it is.
+                if should_stop is not None:
+                    _t = time.monotonic()
+                    _stop = await should_stop()
+                    parked += time.monotonic() - _t
+                else:
+                    _stop = False
+                if _stop:
                     if not dry_run:
                         await db.commit()
                     logger.info("stop requested — ending after %s games", index)
                     return {
                         "selected": len(appids), "processed": index, "written": written,
                         "no_group": no_group, "failed": failed, "stopped": True,
+                        "elapsed": round(time.monotonic() - started - parked, 1),
                     }
             if not dry_run:
                 await db.commit()
@@ -185,6 +206,7 @@ async def run(
         "failed": failed,
         "persisted": not dry_run,
     }
+    summary["elapsed"] = round(time.monotonic() - started - parked, 1)
     logger.info("Summary: %s", summary)
     return summary
 

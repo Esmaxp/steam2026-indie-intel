@@ -156,6 +156,9 @@ async def run(
     # announced a figure, so the other 95% leave no trace of being read.
     last_appid = 0
     visited = 0
+    started = time.monotonic()
+    parked = 0.0
+
     async with make_session() as http:
         client = SteamClient(http, min_interval=MIN_INTERVAL)
         for index, appid in enumerate(appids, start=1):
@@ -185,11 +188,22 @@ async def run(
                         # counts only within this batch, so a CLI-driven sweep
                         # needs the appid to know how far it has really got.
                         "appid": appid,
+                        # Seconds of actual work behind `processed`.
+                        "elapsed": round(time.monotonic() - started - parked, 1),
                         "found": len(found),
                         "games_with_disclosures": len({d.appid for d in found}),
                         "failed": failed,
                     })
-            if should_stop is not None and await should_stop():
+            # should_stop blocks for the whole of a pause, so timing the call
+            # is exactly the parked duration — without subtracting it a
+            # resumed run reads as permanently slower than it is.
+            if should_stop is not None:
+                _t = time.monotonic()
+                _stop = await should_stop()
+                parked += time.monotonic() - _t
+            else:
+                _stop = False
+            if _stop:
                 logger.info("stop requested — ending after %s games", index)
                 stopped = True
                 break
@@ -202,6 +216,7 @@ async def run(
         # Games actually read, and where the walk got to.
         "processed": visited,
         "appid": last_appid,
+        "elapsed": round(time.monotonic() - started - parked, 1),
         "games_with_disclosures": len({d.appid for d in found}),
         "disclosures": len(found),
         "failed": failed,

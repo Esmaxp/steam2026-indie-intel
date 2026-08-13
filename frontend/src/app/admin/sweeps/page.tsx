@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   cancelSweep,
+  fetchSummary,
   fetchSweeps,
   pauseSweep,
   rerunSweep,
@@ -41,34 +42,54 @@ function isStale(job: SweepOut): boolean {
   return Date.now() - new Date(last).getTime() > STALE_AFTER_MS;
 }
 
+/** `secondsPerGame` matches the interval each worker enforces, and is what
+ *  turns a catalogue size into a duration. Hardcoding the duration instead is
+ *  what went wrong before: "the whole catalogue is ~6h" was written when the
+ *  catalogue was 5,400 upcoming games, and still said ~6h at 23,078 — sitting
+ *  directly above an ETA of 16h, which made the ETA look broken when it was
+ *  the sentence that had rotted. */
 const SWEEPERS: {
   kind: SweepKind;
   label: string;
-  detail: string;
+  detail: (catalogue: number | undefined) => string;
+  secondsPerGame: number | null;
   respectsDates: boolean;
 }[] = [
   {
     kind: "rank",
     label: "Wishlist rank",
-    detail:
+    // Not per-game: one global chart Valve paginates itself, ~53 requests.
+    secondsPerGame: null,
+    detail: () =>
       "Valve's Top-Wishlists chart, ~53 requests / ~3 min. Ignores the date range — it is one global list Valve orders itself.",
     respectsDates: false,
   },
   {
     kind: "followers",
     label: "Followers",
-    detail:
-      "Community-hub member counts. ~4s per game, so the whole catalogue is ~6h. Resumable: it skips anything checked in the last 20h.",
+    secondsPerGame: 4,
+    detail: (n) =>
+      `Community-hub member counts. ~4s per game${span(n, 4)}. Resumable: it skips anything checked in the last 20h.`,
     respectsDates: true,
   },
   {
     kind: "disclosures",
     label: "Wishlist disclosures",
-    detail:
-      "Scans Steam news for developer-announced wishlist counts. ~1.5s per game. Only ~5% of games ever announce one, so most stay Unknown.",
+    secondsPerGame: 1.5,
+    detail: (n) =>
+      `Scans Steam news for developer-announced wishlist counts. ~1.5s per game${span(n, 1.5)}. Only ~5% of games ever announce one, so most stay Unknown.`,
     respectsDates: true,
   },
 ];
+
+/** ", so the full 23,078-game catalogue is ~26h" — or nothing at all until the
+ *  catalogue size has loaded, rather than a guess that could rot again. */
+function span(catalogue: number | undefined, secondsPerGame: number): string {
+  if (!catalogue) return "";
+  return `, so the full ${fmtInt(catalogue)}-game catalogue is ~${fmtDuration(
+    catalogue * secondsPerGame,
+  )}`;
+}
 
 function statusTone(status: SweepOut["status"]): string {
   if (status === "done") return "border-good-text/40 text-good-text";
@@ -224,6 +245,16 @@ export default function SweepsAdminPage() {
   const [limit, setLimit] = useState("");
   const queryClient = useQueryClient();
 
+  // For the per-sweeper durations: a catalogue size that is looked up rather
+  // than baked into the copy.
+  const { data: summary } = useQuery({
+    queryKey: ["dashboard-summary"],
+    queryFn: fetchSummary,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const catalogue = summary?.total_games;
+
   const { data, isError, error } = useQuery({
     queryKey: ["admin-sweeps"],
     queryFn: fetchSweeps,
@@ -311,7 +342,9 @@ export default function SweepsAdminPage() {
                   {!sweeper.respectsDates ? (
                     <Badge className="ml-2 border-hairline text-muted">ignores dates</Badge>
                   ) : null}
-                  <span className="block text-xs text-muted">{sweeper.detail}</span>
+                  <span className="block text-xs text-muted">
+                    {sweeper.detail(catalogue)}
+                  </span>
                 </span>
               </label>
             ))}

@@ -1,84 +1,47 @@
-"""Throughput measurement for sweep ETAs.
+"""Seconds-per-game, the pace behind every sweep ETA.
 
-Both behaviours pinned here were shipped wrong first, and both produced an ETA
-that looked authoritative while being off by a factor of two or more. The
-underlying awkwardness is that the follower worker commits every 50 rows, so
-its timestamped trail is a series of spikes, not a smooth series — and every
-naive reading of a spiky trail is biased.
+The estimate is remaining-games x seconds-per-game. Remaining comes from the
+database; this file covers the other half.
+
+It is reported by the worker rather than inferred, and that is the whole point.
+An earlier version derived the pace from the rows the follower collector
+wrote, which forced a division by the share of games that have a community
+hub — a small, noisy sample early in a run. On a sweep whose real pace never
+moved off 3.97s per game, that divisor reported anything from 13h to 26h.
 """
 
-import datetime
-
-from app.services.sweep_eta import _hit_ratio, rate_from_batches
-
-T0 = datetime.datetime(2026, 8, 13, 12, 0, tzinfo=datetime.timezone.utc)
+from app.services.sweep_eta import MIN_TIMING_SAMPLES, seconds_per_game
 
 
-def batches(gaps_seconds: list[float], rows: int = 50):
-    """A commit trail: `rows` written every gap. The first entry anchors the
-    series and contributes no rate of its own."""
-    out = [(T0, rows)]
-    at = T0
-    for gap in gaps_seconds:
-        at = at + datetime.timedelta(seconds=gap)
-        out.append((at, rows))
-    return out
+def test_pace_is_elapsed_over_games():
+    assert seconds_per_game({"processed": 100, "elapsed": 397.0}) == 3.97
 
 
-def test_steady_sweep_measures_its_true_rate():
-    """50 rows every 200s is 0.25 rows/s, however the rows clump."""
-    assert rate_from_batches(batches([200, 200, 200, 200])) == 0.25
+def test_pace_is_unknown_until_enough_games_are_timed():
+    """One slow request out of three would set the pace for a 17-hour job."""
+    assert seconds_per_game({"processed": 3, "elapsed": 30.0}) is None
+    assert seconds_per_game({"processed": MIN_TIMING_SAMPLES, "elapsed": 100.0}) == 4.0
 
 
-def test_rows_are_charged_to_the_gap_that_produced_them():
-    """The bug this replaced divided total rows by the span from first to last
-    timestamp. That ignores the 200s which produced the first batch, so 250
-    rows over an 800s span read as 0.31/s — a quarter too fast."""
-    trail = batches([200, 200, 200, 200])
-    total_rows = sum(rows for _, rows in trail)
-    span = (trail[-1][0] - trail[0][0]).total_seconds()
-    naive = total_rows / span
-
-    assert naive > 0.3  # the old reading
-    assert rate_from_batches(trail) == 0.25  # the true rate
+def test_pace_is_unknown_without_a_timing():
+    """Runs from before the worker reported elapsed still have counters, and
+    must fall back to the configured interval rather than divide by zero."""
+    assert seconds_per_game({"processed": 400}) is None
+    assert seconds_per_game({"processed": 400, "elapsed": 0}) is None
+    assert seconds_per_game({}) is None
 
 
-def test_a_pause_inside_the_window_does_not_drag_the_rate_down():
-    """A sweep paused for 20 minutes leaves one enormous gap. Averaging would
-    report a rate several times too slow and an ETA of days; the median
-    discards the idle stretch as the outlier it is."""
-    paused = rate_from_batches(batches([200, 200, 1200, 200, 200]))
-    assert paused == 0.25
+def test_a_batch_that_slowed_down_reports_the_slower_pace():
+    """The point of measuring: if Steam throttles, the ETA has to follow it
+    rather than keep quoting the configured interval."""
+    assert seconds_per_game({"processed": 100, "elapsed": 1200.0}) == 12.0
 
 
-def test_a_single_slow_batch_does_not_spike_the_rate():
-    """Symmetric to the pause case: one unusually fast batch (a run of games
-    with no hub, committed together) must not make the sweep look quick."""
-    assert rate_from_batches(batches([200, 200, 20, 200, 200])) == 0.25
-
-
-def test_too_few_batches_is_not_a_measurement():
-    """Two commits is one interval. Reporting a 'measured' rate from it would
-    dress up a single sample as throughput."""
-    assert rate_from_batches(batches([200])) is None
-    assert rate_from_batches([]) is None
-
-
-def test_simultaneous_commits_are_skipped_not_divided_by_zero():
-    trail = [(T0, 50), (T0, 50), (T0, 50), (T0, 50), (T0, 50)]
-    assert rate_from_batches(trail) is None
-
-
-def test_hit_ratio_converts_writes_to_visits():
-    """Games with no community hub write nothing, so a write rate understates
-    how fast the sweep is moving through the catalogue."""
-    assert _hit_ratio({"processed": 100, "written": 76}) == 0.76
-
-
-def test_hit_ratio_is_unknown_before_the_run_has_evidence():
-    """Not a guessed constant. The ratio converts a write rate into a visit
-    rate, so a wrong assumption lands straight in the ETA — assuming 0.75
-    against a real 0.97 reported 13.5h on an 18h sweep. Unknown means the
-    caller quotes the nominal interval instead of a false measurement."""
-    assert _hit_ratio({}) is None
-    assert _hit_ratio({"processed": 3, "written": 3}) is None
+def test_pace_ignores_time_parked_at_a_pause():
+    """`elapsed` is the worker's active time, not wall-clock. A run paused for
+    an hour mid-batch must not come back reporting an hour per game — the
+    worker subtracts the parked duration before reporting."""
+    active = {"processed": 100, "elapsed": 400.0}
+    wall_clock_with_a_1h_pause = {"processed": 100, "elapsed": 400.0 + 3600}
+    assert seconds_per_game(active) == 4.0
+    assert seconds_per_game(wall_clock_with_a_1h_pause) == 40.0  # what NOT to report
