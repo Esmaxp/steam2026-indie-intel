@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import Dimension, Game, Genre, game_genres
+from app.models import DataStatus, Dimension, Game, Genre, game_genres
 from app.schemas.charts import (
     BreakdownPoint,
     ChartsOut,
@@ -14,7 +14,8 @@ from app.schemas.charts import (
 from app.schemas.game import AverageStat, DashboardSummary
 from app.services import boxleiter
 from app.services.games_query import (
-    latest_revenue_sq,
+    latest_followers_sq,
+    latest_rank_sq,
     latest_stats_sq,
     latest_wishlist_sq,
     next_fest_exists,
@@ -42,9 +43,23 @@ async def _avg(db: AsyncSession, sq_column) -> AverageStat:
     )
 
 
+async def _count_matching(db: AsyncSession, sq, extra=None) -> int:
+    """Catalogue games having a row in `sq`. Inner join, so chart entries for
+    games outside this catalogue are excluded."""
+    stmt = (
+        sa.select(sa.func.count())
+        .select_from(Game)
+        .join(sq, sq.c.appid == Game.appid)
+    )
+    if extra is not None:
+        stmt = stmt.where(extra)
+    return (await db.execute(stmt)).scalar_one()
+
+
 @router.get("/summary", response_model=DashboardSummary)
 async def summary(db: AsyncSession = Depends(get_db)) -> DashboardSummary:
-    ls, lw, lr = latest_stats_sq(), latest_wishlist_sq(), latest_revenue_sq()
+    ls, lw = latest_stats_sq(), latest_wishlist_sq()
+    lf, lrk = latest_followers_sq(), latest_rank_sq()
     return DashboardSummary(
         total_games=await _count(db),
         released_games=await _count(db, Game.is_released.is_(True)),
@@ -54,8 +69,14 @@ async def summary(db: AsyncSession = Depends(get_db)) -> DashboardSummary:
         games_with_demo=await _count(db, Game.demo_available.is_(True)),
         next_fest_games=await _count(db, next_fest_exists()),
         avg_reviews=await _avg(db, ls.c.total_reviews),
-        avg_wishlist=await _avg(db, lw.c.wishlist_count),
-        avg_revenue=await _avg(db, lr.c.gross_revenue_usd),
+        # Coverage counters rather than averages. An average wishlist figure
+        # would be computed over a handful of developer disclosures that are
+        # mostly lower bounds — a number with no defensible meaning.
+        games_with_followers=await _count_matching(db, lf),
+        ranked_games=await _count_matching(db, lrk),
+        confirmed_wishlist_games=await _count_matching(
+            db, lw, lw.c.status == DataStatus.CONFIRMED
+        ),
     )
 
 

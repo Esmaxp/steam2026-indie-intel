@@ -7,7 +7,8 @@
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-steam}
       POSTGRES_DB: ${POSTGRES_DB:-steam2026}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # host:container — the container side stays 5432 (namespaced, never clashes).
+      - "${POSTGRES_PORT:-9432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d:ro
@@ -18,7 +19,11 @@
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      # Repo-root context: the API runs the collectors in-process for
+      # admin-triggered sweeps, so it needs scraper/ and workers/.
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
@@ -28,13 +33,12 @@
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
       TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
-      # Required for the channel-submission review endpoints.
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      # host:container — uvicorn listens on 8000 inside; 9100 is the host port.
+      - "9100:8000"
     volumes:
       - ./exports:/data/exports
       - ./logs:/data/logs
@@ -57,7 +61,6 @@
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
       LOGS_DIR: /data/logs
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      GAMALYTIC_API_KEY: ${GAMALYTIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -77,7 +80,6 @@
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
       LOGS_DIR: /data/logs
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      GAMALYTIC_API_KEY: ${GAMALYTIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -97,7 +99,6 @@
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
       LOGS_DIR: /data/logs
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      GAMALYTIC_API_KEY: ${GAMALYTIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -106,6 +107,88 @@
     volumes:
       - ./logs:/data/logs
     command: ["python", "-m", "scraper.collectors.run_market"]
+
+  # Unit tests — pure functions, no database, no network:
+  #   docker compose run --rm tests
+  #   docker compose run --rm tests python -m pytest tests/test_search_parse.py -v
+  tests:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./tests:/srv/tests:ro
+      - ./pytest.ini:/srv/pytest.ini:ro
+    command: ["python", "-m", "pytest"]
+
+  # Developer-disclosed wishlist counts from official Steam news:
+  #   docker compose run --rm disclosures [--limit 500] [--write]
+  # Writes CONFIRMED rows, so it defaults to a dry run: without --write it
+  # only emits a CSV to ./logs for a human to review first.
+  disclosures:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.harvest_disclosures"]
+
+  # Community-hub follower counts — run daily in bounded batches:
+  #   docker compose run --rm followers [--limit 500] [--dry-run]
+  # Keyless first-party. A full 5.6k-game sweep is ~6h at 4s spacing, so
+  # prefer several bounded runs over one long one.
+  followers:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FOLLOWERS_MIN_INTERVAL: ${FOLLOWERS_MIN_INTERVAL:-4.0}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "workers.refresh_followers"]
+
+  # Valve Top-Wishlists ordinal sweep — run daily:
+  #   docker compose run --rm rank_sweep [--dry-run]
+  # First-party and unauthenticated: no API key of any kind. Records each
+  # game's RANK, never a wishlist count — Valve publishes no counts.
+  rank_sweep:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    profiles: ["scrape"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
+      LOGS_DIR: /data/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./logs:/data/logs
+    command: ["python", "-m", "scraper.collectors.run_rank_sweep"]
 
   # Low-priority backfill — run occasionally:  docker compose run --rm websites
   #   with flags: docker compose run --rm websites python -m workers.backfill_websites --limit 300
@@ -247,7 +330,6 @@
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
       LOGS_DIR: /data/logs
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      GAMALYTIC_API_KEY: ${GAMALYTIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -339,7 +421,6 @@
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}
       LOGS_DIR: /data/logs
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      GAMALYTIC_API_KEY: ${GAMALYTIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -359,7 +440,9 @@
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        # Baked in at build time and read by the BROWSER, so it must be the
+        # host-side backend port (9100), not the container-internal 8000.
+        NEXT_PUBLIC_API_URL: http://localhost:9100
     restart: unless-stopped
     environment:
       # Community Clips server-side keys (empty = platform gracefully skipped)
@@ -372,7 +455,8 @@
       backend:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      # host:container — Next's standalone server listens on 3000 inside.
+      - "4000:3000"
 
 volumes:
   pgdata:

@@ -2,7 +2,8 @@
 
 - GET  /games/{appid}/videos              lazy fetch + cache (see services.videos)
 - POST /games/{appid}/channel-submissions self-service form → pending review
-- /admin/channel-submissions              review queue (X-Admin-Token header)
+- /admin/channel-submissions              review queue (see require_admin:
+                                          auth is a no-op for now)
 """
 
 import datetime
@@ -163,12 +164,22 @@ async def submit_channels(
 # ---------------------------------------------------------------- admin ----
 
 
-def require_admin(x_admin_token: str = Header(default="")) -> None:
-    settings = get_settings()
-    if not settings.admin_token:
-        raise HTTPException(status_code=503, detail="ADMIN_TOKEN is not configured")
-    if x_admin_token != settings.admin_token:
-        raise HTTPException(status_code=401, detail="Invalid admin token")
+def require_admin() -> None:
+    """Authorisation seam for every /admin route — CURRENTLY A NO-OP.
+
+    The shared-token check was removed pending real authentication. Until that
+    lands, ANY caller that can reach this API has full admin access: approving
+    channel submissions, and starting collector sweeps that run for hours and
+    write CONFIRMED rows.
+
+    That is acceptable only while the backend is bound to localhost. Do not
+    expose port 9100 beyond the host until this function actually
+    authenticates.
+
+    It stays wired into every admin route on purpose: implementing auth means
+    changing this one function, not hunting down decorators.
+    """
+    return None
 
 
 def _submission_out(sub: ChannelSubmission, game_name: str | None) -> SubmissionOut:

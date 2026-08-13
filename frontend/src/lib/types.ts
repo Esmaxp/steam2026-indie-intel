@@ -9,6 +9,10 @@ export interface Provenanced {
   source_url: string | null;
   recorded_at: string | null;
   estimate_spread: number | null;
+  /** ">=" when the source stated a lower bound ("over 100,000 wishlists"). */
+  comparator: string;
+  /** When the source published it, vs recorded_at = when we ingested it. */
+  disclosed_on: string | null;
 }
 
 export interface RevenueEstimateOut {
@@ -56,12 +60,38 @@ export interface GameListItem {
   review_score_desc: string | null;
   peak_ccu: number | null;
   avg_ccu: number | null;
+  // Measured first-party values Valve publishes — deliberately NOT Provenanced.
+  followers: number | null;
+  followers_captured_at: string | null;
+  follower_delta_14d: number | null;
+  follower_delta_14d_pct: number | null;
+  /** Valve's Top-Wishlists position: an ORDER, not a count. null = not on the
+   *  chart, which is the common case (~5.2k games across all of Steam). */
+  wishlist_rank: number | null;
+  wishlist_ranked: boolean;
+  /** Positive = moved up the chart. Hidden by default until day-over-day
+   *  volatility is measured — see scripts/rank_delta_report.py. */
+  rank_delta_7d: number | null;
+  /** Only ever `confirmed` (a developer disclosed it) or `unknown`. */
   wishlist: Provenanced;
   revenue: Provenanced;
   estimated_sales: number | null;
-  budget: Provenanced;
   /** Cached community-video clip count (0 = none fetched/found). */
   video_count: number;
+}
+
+export interface FollowerPoint {
+  captured_at: string;
+  followers: number;
+  source_name: string | null;
+  source_url: string | null;
+}
+
+export interface RankPoint {
+  swept_at: string;
+  rank: number;
+  total_ranked: number | null;
+  cc: string;
 }
 
 export interface StatsPoint {
@@ -105,6 +135,10 @@ export interface FestivalOut {
 export interface WishlistRecordOut {
   status: DataStatus;
   wishlist_count: number | null;
+  /** ">=" when the developer stated a lower bound ("over 100,000"). */
+  comparator: string;
+  /** The announcement's date; recorded_at is only when we ingested it. */
+  disclosed_on: string | null;
   source_name: string | null;
   source_url: string | null;
   recorded_at: string;
@@ -248,8 +282,11 @@ export interface DashboardSummary {
   games_with_demo: number;
   next_fest_games: number;
   avg_reviews: AverageStat;
-  avg_wishlist: AverageStat;
-  avg_revenue: AverageStat;
+  // Coverage counters, not averages — there is no meaningful average of a
+  // handful of developer-disclosed lower bounds.
+  games_with_followers: number;
+  ranked_games: number;
+  confirmed_wishlist_games: number;
 }
 
 export interface FilterOptions {
@@ -261,4 +298,32 @@ export interface FilterOptions {
   graphics_styles: string[];
   data_statuses: string[];
   release_months: number[];
+}
+
+/** An admin-triggered collector run. */
+export type SweepKind = "disclosures" | "followers" | "rank";
+
+export interface SweepOut {
+  id: number;
+  kinds: SweepKind[];
+  /** Release-date window limiting WHICH GAMES are scanned. The rank sweep
+   *  ignores it — that chart is a single global list Valve orders itself. */
+  release_from: string | null;
+  release_to: string | null;
+  limit_per_kind: number | null;
+  status: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted";
+  cancel_requested: boolean;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  /** Per-kind counters, shape depends on the collector. */
+  progress: Record<string, Record<string, number | string | boolean>>;
+  error: string | null;
+}
+
+export interface SweepRequestBody {
+  kinds: SweepKind[];
+  release_from?: string | null;
+  release_to?: string | null;
+  limit_per_kind?: number | null;
 }

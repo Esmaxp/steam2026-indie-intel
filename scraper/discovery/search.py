@@ -3,6 +3,17 @@
 Uses the store search endpoint (infinite-scroll JSON) filtered to games
 carrying the Indie tag. Efficient: release-date-sorted paging finds 2026
 releases without scanning the entire Steam catalog.
+
+HTTP posture for anything that sweeps this endpoint: the store host DOES
+rate-limit even at ~3s spacing (measured: one 429 in ~160 requests, no
+Retry-After header). SteamClient already maps 429 to RetryableHTTPError with
+exponential jitter over 6 attempts — use it as-is. Do NOT lower max_attempts
+for a paged sweep: a dropped page does not raise, it silently truncates the
+result set, and a short sweep looks identical to a complete one.
+
+`cc` is pinned in BASE_PARAMS deliberately. Store listings are region-scoped,
+so an unpinned or differing `cc` returns a materially different result set
+(cc=de retained 11/50 positions against cc=us on a sampled page).
 """
 
 import logging
@@ -41,29 +52,50 @@ class SearchRow:
     release_text: str
 
 
+def parse_search_row(anchor) -> SearchRow | None:
+    """One search-result anchor to a SearchRow, or None if it is not a game.
+
+    Keys on data-ds-itemkey ("App_1145360" / "Sub_1686522"), NOT on
+    data-ds-appid. A package row carries a comma-separated appid LIST, so
+    taking its first element admits a bundled game under the package's title
+    and release date — and the same appid can arrive twice from two different
+    package rows. Observed live on the popular-wishlist listing:
+    Sub_1686522 -> "2054970,2593180,2593190,2593290".
+
+    Every row on the store's search listings carries an itemkey (verified
+    50/50 on sampled pages); the data-ds-appid fallback exists only so a
+    markup change degrades to skipping rows rather than mis-attributing
+    them, which is why a comma there is rejected rather than split.
+    """
+    itemkey = anchor.get("data-ds-itemkey")
+    if itemkey:
+        if not str(itemkey).startswith("App_"):
+            return None  # Sub_ / Bundle_ rows are not games
+        raw_appid = str(itemkey)[len("App_") :]
+    else:
+        raw_appid = str(anchor.get("data-ds-appid") or "")
+        if not raw_appid or "," in raw_appid:
+            return None
+    try:
+        appid = int(raw_appid)
+    except ValueError:
+        return None
+
+    title_el = anchor.select_one("span.title")
+    if title_el is None:
+        return None
+    released_el = anchor.select_one(".search_released")
+    return SearchRow(
+        appid=appid,
+        name=title_el.get_text(strip=True),
+        release_text=released_el.get_text(strip=True) if released_el else "",
+    )
+
+
 def parse_results_html(html: str) -> list[SearchRow]:
     soup = BeautifulSoup(html, "html.parser")
-    rows: list[SearchRow] = []
-    for anchor in soup.select("a.search_result_row"):
-        raw_appid = anchor.get("data-ds-appid")
-        if not raw_appid:
-            continue  # bundles / packages have no single appid
-        try:
-            appid = int(str(raw_appid).split(",")[0])
-        except ValueError:
-            continue
-        title_el = anchor.select_one("span.title")
-        released_el = anchor.select_one(".search_released")
-        if title_el is None:
-            continue
-        rows.append(
-            SearchRow(
-                appid=appid,
-                name=title_el.get_text(strip=True),
-                release_text=released_el.get_text(strip=True) if released_el else "",
-            )
-        )
-    return rows
+    parsed = (parse_search_row(a) for a in soup.select("a.search_result_row"))
+    return [row for row in parsed if row is not None]
 
 
 async def iter_search_pages(

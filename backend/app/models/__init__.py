@@ -31,7 +31,13 @@ from app.models.enums import (
 from app.models.festival import Festival
 from app.models.game import Game
 from app.models.media import MediaAsset
-from app.models.stats import SteamStats
+from app.models.stats import (
+    FollowerSnapshot,
+    SteamStats,
+    WishlistRankEntry,
+    WishlistRankSweep,
+)
+from app.models.sweeps import SWEEP_KINDS, TERMINAL_STATUSES, SweepJob
 from app.models.sync import SyncState
 from app.models.taxonomy import Genre, Tag
 from app.models.videos import (
@@ -52,6 +58,7 @@ __all__ = [
     "Developer",
     "Dimension",
     "Festival",
+    "FollowerSnapshot",
     "Game",
     "GameChannels",
     "GameEngine",
@@ -65,13 +72,18 @@ __all__ = [
     "RevenueEstimate",
     "RevenueRecord",
     "SteamDeckSupport",
+    "SWEEP_KINDS",
     "SteamStats",
+    "SweepJob",
     "SyncStage",
     "SyncState",
     "SyncStatus",
+    "TERMINAL_STATUSES",
     "Tag",
     "VideoCache",
     "WebsiteScan",
+    "WishlistRankEntry",
+    "WishlistRankSweep",
     "WishlistRecord",
     "game_developers",
     "game_festivals",

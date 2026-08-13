@@ -13,6 +13,7 @@ from app.models import (
     DataStatus,
     Dimension,
     Festival,
+    FollowerSnapshot,
     Game,
     GameEngine,
     GraphicsStyle,
@@ -21,12 +22,21 @@ from app.models import (
     RevenueRecord,
     SteamStats,
     Tag,
+    WishlistRankEntry,
+    WishlistRankSweep,
     WishlistRecord,
     game_festivals,
     game_tags,
 )
 from app.schemas.common import Page
-from app.schemas.game import GameDetail, GameListItem, GameSearchResult, StatsPoint
+from app.schemas.game import (
+    FollowerPoint,
+    GameDetail,
+    GameListItem,
+    GameSearchResult,
+    RankPoint,
+    StatsPoint,
+)
 from app.services.games_query import GameFilters, build_games_query
 from app.services.similar_games import build_similar_query, fetch_source
 
@@ -71,8 +81,16 @@ async def list_games(
     min_reviews: int | None = Query(None, ge=0),
     min_positive_pct: float | None = Query(None, ge=0, le=100),
     min_peak_ccu: int | None = Query(None, ge=0),
-    min_wishlist: int | None = Query(None, ge=0),
     min_revenue: float | None = Query(None, ge=0),
+    min_followers: int | None = Query(
+        None, ge=0, description="Steam community-hub followers — a measured value"
+    ),
+    ranked_only: bool | None = Query(
+        None, description="only games on Valve's Top-Wishlists chart (~5.2k of all Steam)"
+    ),
+    max_wishlist_rank: int | None = Query(
+        None, ge=1, description="keep games at or above this Top-Wishlists position"
+    ),
     wishlist_status: DataStatus | None = None,
     revenue_status: DataStatus | None = None,
     indie_confidence: IndieConfidence | None = None,
@@ -82,7 +100,9 @@ async def list_games(
     sort: str = Query(
         "-release_date",
         description="column name, '-' prefix = descending; one of: appid, name, "
-        "release_date, price, reviews, positive_pct, peak_ccu, wishlist, revenue, videos",
+        "release_date, price, reviews, positive_pct, peak_ccu, videos, "
+        "followers, follower_delta_14d, wishlist_rank, rank_delta_7d. NOTE: "
+        "wishlist_rank sorts ascending-is-better (rank 1 is the top of the chart)",
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
@@ -95,7 +115,9 @@ async def list_games(
         release_status=release_status,
         early_access=early_access, free=free, release_month=release_month,
         min_reviews=min_reviews, min_positive_pct=min_positive_pct,
-        min_peak_ccu=min_peak_ccu, min_wishlist=min_wishlist, min_revenue=min_revenue,
+        min_peak_ccu=min_peak_ccu, min_revenue=min_revenue,
+        min_followers=min_followers, ranked_only=ranked_only,
+        max_wishlist_rank=max_wishlist_rank,
         wishlist_status=wishlist_status, revenue_status=revenue_status,
         indie_confidence=indie_confidence, include_flagged=include_flagged, sort=sort,
     )
@@ -213,7 +235,13 @@ async def get_game(appid: int, db: AsyncSession = Depends(get_db)) -> GameDetail
             await db.execute(
                 sa.select(WishlistRecord)
                 .where(WishlistRecord.appid == appid)
-                .order_by(WishlistRecord.recorded_at.desc())
+                # Newest DISCLOSURE first. A harvest writes a game's whole
+                # milestone history in one transaction, so recorded_at is
+                # identical across rows and cannot order them.
+                .order_by(
+                    WishlistRecord.disclosed_on.desc().nullslast(),
+                    WishlistRecord.recorded_at.desc(),
+                )
             )
         )
         .scalars()
@@ -280,3 +308,71 @@ async def get_game_stats(appid: int, db: AsyncSession = Depends(get_db)) -> list
         .all()
     )
     return [stats_point(p) for p in points]
+
+
+async def _require_game(appid: int, db: AsyncSession) -> None:
+    exists = (
+        await db.execute(sa.select(Game.appid).where(Game.appid == appid))
+    ).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+
+@router.get("/{appid}/followers", response_model=list[FollowerPoint])
+async def get_game_followers(
+    appid: int, db: AsyncSession = Depends(get_db)
+) -> list[FollowerPoint]:
+    """Community-hub follower history — measured, first-party, exact."""
+    await _require_game(appid, db)
+    rows = (
+        (
+            await db.execute(
+                sa.select(FollowerSnapshot)
+                .where(FollowerSnapshot.appid == appid)
+                .order_by(FollowerSnapshot.captured_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        FollowerPoint(
+            captured_at=r.captured_at,
+            followers=r.followers,
+            source_name=r.source_name,
+            source_url=r.source_url,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/{appid}/rank-history", response_model=list[RankPoint])
+async def get_game_rank_history(
+    appid: int, db: AsyncSession = Depends(get_db)
+) -> list[RankPoint]:
+    """Valve Top-Wishlists position over time — an ORDER, never a count.
+
+    Only COMPLETE sweeps are returned: a partial sweep holds just the head of
+    the chart, so including one would look like the game dropped off it.
+    """
+    await _require_game(appid, db)
+    rows = (
+        await db.execute(
+            sa.select(
+                WishlistRankSweep.started_at,
+                WishlistRankEntry.rank,
+                WishlistRankSweep.rows_ingested,
+                WishlistRankSweep.cc,
+            )
+            .join(WishlistRankEntry, WishlistRankEntry.sweep_id == WishlistRankSweep.id)
+            .where(
+                WishlistRankEntry.appid == appid,
+                WishlistRankSweep.status == "complete",
+            )
+            .order_by(WishlistRankSweep.started_at.asc())
+        )
+    ).all()
+    return [
+        RankPoint(swept_at=started_at, rank=rank, total_ranked=rows_ingested, cc=cc)
+        for started_at, rank, rows_ingested, cc in rows
+    ]

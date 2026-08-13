@@ -190,20 +190,27 @@ export function FiltersBar() {
           }
         />
         <HideFlaggedToggle />
+        {/* Now a real partition of the catalogue: `confirmed` = a developer
+            disclosed a figure, `unknown` = everything else. */}
         <ParamSelect
           paramKey="wishlist_status"
           label="Wishlist status"
           options={options?.data_statuses ?? []}
         />
-        <ParamSelect
-          paramKey="revenue_status"
-          label="Revenue status"
-          options={options?.data_statuses ?? []}
-        />
+        <ParamToggle paramKey="ranked_only" label="On wishlist chart" />
         <DebouncedInput paramKey="min_reviews" placeholder="Min reviews" className="w-28" />
         <DebouncedInput paramKey="min_positive_pct" placeholder="Min +%" className="w-24" />
         <DebouncedInput paramKey="min_peak_ccu" placeholder="Min CCU" className="w-24" />
-        <DebouncedInput paramKey="min_wishlist" placeholder="Min wishlist" className="w-28" />
+        <DebouncedInput
+          paramKey="min_followers"
+          placeholder="Min followers"
+          className="w-32"
+        />
+        <DebouncedInput
+          paramKey="max_wishlist_rank"
+          placeholder="Rank ≤"
+          className="w-24"
+        />
         {hasFilters ? (
           <Button
             onClick={() =>

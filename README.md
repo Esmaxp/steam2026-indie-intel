@@ -28,13 +28,17 @@ in order; each states its expected outcome.
    docker compose up --build -d
    ```
 
+   Day to day, `./scripts/start-all.sh` restarts the stack and waits until it
+   is actually serving before returning (`--build` to rebuild, `--logs` to
+   follow, `--stop` to shut down).
+
    Alembic migrations apply automatically when the backend container starts.
    First build takes a few minutes (Next.js production build).
 
    Expected outcome:
-   - `GET http://localhost:8000/health` returns 200 with
+   - `GET http://localhost:9100/health` returns 200 with
      `{"status":"ok","database":"ok"}`
-   - http://localhost:3000 loads the dashboard (empty until step 3)
+   - http://localhost:4000 loads the dashboard (empty until step 3)
 
 3. **Load data — pick ONE of the three options below.**
 
@@ -47,12 +51,14 @@ in order; each states its expected outcome.
    docker compose run --rm backend alembic upgrade head   # in case migrations landed after the export
    ```
 
-   Expected outcome: the dashboard shows ~14,000+ games immediately. The
-   snapshot date is in `database/seed/full_export.meta.txt` — prices,
-   reviews and wishlist/revenue estimates are only as fresh as that date.
-   Run `docker compose run --rm refresher` afterward for current stats, or
-   `pipeline` to re-discover games released since the snapshot. Safe to
-   re-run (the restore drops and recreates the dumped objects).
+   Expected outcome: the dashboard shows ~14,000+ games immediately, with
+   follower counts and Top-Wishlists ranks already populated. The snapshot
+   date is in `database/seed/full_export.meta.txt` — prices, reviews,
+   followers and ranks are only as fresh as that date. Run
+   `docker compose run --rm refresher` afterward for current stats,
+   `followers` / `rank_sweep` for current demand signals, or `pipeline` to
+   re-discover games released since the snapshot. Safe to re-run (the
+   restore drops and recreates the dumped objects).
 
    **(b) Quick sample — run the real pipeline on ~50 games** (~10 minutes;
    use this if you specifically want to test the collection pipeline
@@ -76,10 +82,10 @@ in order; each states its expected outcome.
 ### Verify your setup
 
 - [ ] `docker compose ps` shows `db`, `backend`, `frontend` running (healthy)
-- [ ] `curl http://localhost:8000/health` → `{"status":"ok","database":"ok"}`
-- [ ] http://localhost:8000/docs renders the API docs
-- [ ] http://localhost:3000 loads; after step 3 the games table lists ≥ 25 games
-- [ ] `curl "http://localhost:8000/api/v1/games?page_size=1"` returns JSON with
+- [ ] `curl http://localhost:9100/health` → `{"status":"ok","database":"ok"}`
+- [ ] http://localhost:9100/docs renders the API docs
+- [ ] http://localhost:4000 loads; after step 3 the games table lists ≥ 25 games
+- [ ] `curl "http://localhost:9100/api/v1/games?page_size=1"` returns JSON with
       `"total"` ≥ 25
 
 ## Services
@@ -90,9 +96,9 @@ in order; each states its expected outcome.
 
 | Service | Purpose | Port | Auto-start? | Run with |
 |---|---|---|---|---|
-| db | PostgreSQL 16 storage | 5432 | yes | `docker compose up` |
-| backend | FastAPI REST API + migrations | 8000 | yes | `docker compose up` |
-| frontend | Next.js dashboard | 3000 | yes | `docker compose up` |
+| db | PostgreSQL 16 storage | 9432 | yes | `docker compose up` |
+| backend | FastAPI REST API + migrations | 9100 | yes | `docker compose up` |
+| frontend | Next.js dashboard | 4000 | yes | `docker compose up` |
 | db_restore | Restore the committed full-catalog snapshot | – | no (profile: scrape) | `docker compose run --rm db_restore` |
 | seed | Quick-start data seed (~50 games) | – | no (profile: scrape) | `docker compose run --rm seed` |
 | discovery | Find 2026 indie games on Steam | – | no (profile: scrape) | `docker compose run --rm discovery` |
@@ -107,10 +113,14 @@ in order; each states its expected outcome.
 | dimension_local | Fill unresolved 2D/3D from catalog similarity (offline TF-IDF, free) | – | no (profile: scrape) | `docker compose run --rm dimension_local` |
 | dimension_vision | Classify 2D/3D from a screenshot (needs `ANTHROPIC_API_KEY`) | – | no (profile: scrape) | `docker compose run --rm dimension_vision` |
 | dimension_similarity | Estimate 2D/3D from metadata when no tag, rule or screenshot settles it (needs `ANTHROPIC_API_KEY`) | – | no (profile: scrape) | `docker compose run --rm dimension_similarity` |
+| followers | Community-hub follower counts (daily) | – | no (profile: scrape) | `docker compose run --rm followers` |
+| rank_sweep | Valve Top-Wishlists ordinal sweep (daily) | – | no (profile: scrape) | `docker compose run --rm rank_sweep` |
+| disclosures | Developer-disclosed wishlist counts from Steam news | – | no (profile: scrape) | `docker compose run --rm disclosures` |
+| tests | Unit tests (pure functions, no DB) | – | no (profile: scrape) | `docker compose run --rm tests` |
 
 Community-video flow (all optional, needs `YOUTUBE_API_KEY` / `TWITCH_*` keys
 for actual videos): `websites` → `scanner` → review at
-http://localhost:3000/admin/submissions (token = `ADMIN_TOKEN` from `.env`) →
+http://localhost:4000/admin/submissions →
 `video_prefetch`.
 
 Passing flags to an on-demand service requires the full command form, because
@@ -165,6 +175,21 @@ legal notice or description. It is never inferred by AI — an engine is a hard
 fact, not a visual observation, and guessing it would violate the data-honesty
 rule below.
 
+Demand-signal flow (no keys at all — every source is Valve's own): run
+`followers` and `rank_sweep` daily to build the time series that make
+Followers Δ14d and Rank Δ7d meaningful, and `disclosures` occasionally to
+pick up new developer announcements.
+
+All three can also be triggered from the dashboard at **Data sweeps** in the
+header (http://localhost:4000/admin/sweeps): tick any combination, optionally
+narrow which games are scanned by release date, and watch live progress. One
+sweep runs at a time so concurrent runs cannot multiply the request rate
+against Steam.
+
+> **The /admin routes are unauthenticated.** Admin auth is not implemented
+> yet, so anyone who can reach the API can approve submissions and start
+> hours-long sweeps. Keep port 9100 bound to localhost until it is.
+
 ## Data honesty
 
 Steam does **not** expose wishlist, revenue or budget numbers. Every such
@@ -172,14 +197,32 @@ value is stored with a provenance status — **Confirmed / Estimated /
 Unknown / Conflicting** — plus a source link and fetch date. Data is never
 fabricated.
 
-Estimate sources: SteamSpy (owner ranges, free API), Gamalytic (requires
-`GAMALYTIC_API_KEY`), VG Insights public pages (currently behind an
-authenticated SPA → honestly Unknown), and human-verified disclosures via
-`python -m scraper.collectors.disclosed_numbers_source`. Multiple estimates
-are cross-validated by median; sources disagreeing by more than 50% are
-marked **Conflicting** with every source shown. Budgets are either Confirmed
-disclosures or explicitly labeled heuristics (team-cost and revenue-ratio
-methods, formulas and inputs stored for audit — see ARCHITECTURE.md §9).
+**The wishlist column shows a developer-confirmed disclosure, or it shows
+Unknown. There is no derived wishlist number or range for anyone else** — not
+from followers, not from rank, not bought from a vendor. No third-party
+wishlist estimate has ever been validated in public against a real Steamworks
+figure, so no accuracy could be stated for one.
+
+What is shown instead is measured and first-party:
+
+| Column | What it is |
+|---|---|
+| **Followers** | Steam community-hub members — a count Valve publishes. Exact. |
+| **Followers Δ14d** | Change across our own snapshots. Blank, never `0`, until two exist. |
+| **Wishlist rank** | Position on Valve's Top-Wishlists chart. An *order*, not a count — it blends total wishlists with recent velocity. "Not ranked" is the common case: the chart holds ~5.2k games across all of Steam. |
+| **Wishlist** | A figure the developer stated publicly, with the announcement date and a link. `≥` when they gave a lower bound ("over 100,000"), which most do. |
+
+Disclosures are harvested from official Steam news
+(`docker compose run --rm disclosures`), and entered by hand via
+`python -m scraper.collectors.disclosed_numbers_source`. Both write only at
+**Confirmed**, so the harvester defaults to a dry-run CSV for review and needs
+`--write` to insert.
+
+Revenue has no first-party source and reports **Unknown** for every game. The
+third-party estimate vendors were retired: across 8,380 collected rows, none
+carried a revenue or sales figure. **SteamCharts** is kept for concurrent
+players and labelled third-party in the UI — it publishes an observed
+measurement rather than a model output.
 
 ### Genre success breakdown (estimated)
 
@@ -200,9 +243,13 @@ curl "http://localhost:8000/api/v1/dashboard/genre-success?genre=RPG&multiplier=
 
 ## Troubleshooting
 
-- **Port already in use** (5432/8000/3000): stop the conflicting process, or
+- **Port already in use** (9432/9100/4000): stop the conflicting process, or
   change `POSTGRES_PORT` in `.env` (database) / edit the `ports:` mapping in
   `docker-compose.yml` (backend/frontend), then `docker compose up -d`.
+  Only ever change the **left** (host) side of a `ports:` mapping — the right
+  side is the container-internal port the process actually listens on.
+  Moving the backend also means updating `NEXT_PUBLIC_API_URL` (compose build
+  arg) and the CORS origin in `backend/app/main.py`.
 - **Backend unhealthy / migrations pending**: `docker compose logs backend` —
   the container runs `alembic upgrade head` on start; a failure there is
   almost always the db not being ready yet (compose waits on its healthcheck,
@@ -210,10 +257,16 @@ curl "http://localhost:8000/api/v1/dashboard/genre-success?genre=RPG&multiplier=
   schema (`docker compose down -v` wipes it, then `up --build`).
 - **Dashboard is empty**: that's a fresh database, not a bug. Run
   `docker compose run --rm seed` (step 3) and refresh after ~10 minutes.
-- **"not configured" / missing videos or estimates**: optional API keys are
-  empty. This is the documented graceful state — add `GAMALYTIC_API_KEY`,
-  `YOUTUBE_API_KEY` or `TWITCH_*` to `.env` and
-  `docker compose up -d backend frontend` to enable those features.
+- **"not configured" / missing videos**: the YouTube/Twitch keys are empty.
+  This is the documented graceful state — add `YOUTUBE_API_KEY` or
+  `TWITCH_*` to `.env` and `docker compose up -d backend frontend`.
+- **Wishlist column reads "Unknown" / rank reads "Not ranked"**: both are
+  correct, not a misconfiguration. There is no API key that fills them. Run
+  `docker compose run --rm disclosures` to harvest developer announcements,
+  and `docker compose run --rm rank_sweep` to populate ranks; most games will
+  legitimately stay Unknown and unranked.
+- **Followers Δ14d is blank**: it needs two snapshots at least 14 days apart.
+  Run `docker compose run --rm followers` daily; there is no way to backfill.
 
 ## Local development (without Docker)
 
@@ -227,9 +280,9 @@ python -m venv .venv && source .venv/bin/activate
 python -m venv .venv; .venv\Scripts\Activate.ps1
 pip install -e .
 # .env's DATABASE_URL uses host "db" (Docker); for local dev point it at localhost:
-export DATABASE_URL=postgresql+asyncpg://steam:steam@localhost:5432/steam2026  # PowerShell: $env:DATABASE_URL="..."
+export DATABASE_URL=postgresql+asyncpg://steam:steam@localhost:9432/steam2026  # PowerShell: $env:DATABASE_URL="..."
 alembic upgrade head
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 9100
 ```
 
 Frontend:
@@ -238,10 +291,27 @@ Frontend:
 cd frontend
 npm install
 # Linux/macOS:
-NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+NEXT_PUBLIC_API_URL=http://localhost:9100 npm run dev
 # Windows (PowerShell):
-$env:NEXT_PUBLIC_API_URL="http://localhost:8000"; npm run dev
+$env:NEXT_PUBLIC_API_URL="http://localhost:9100"; npm run dev
 ```
+
+## Tests
+
+```bash
+docker compose run --rm tests                                  # whole suite
+docker compose run --rm tests python -m pytest tests/test_search_parse.py -v
+```
+
+No database and no network: every test is a pure-function test over saved
+real payloads in `tests/fixtures/`. That is the point — these parsers fail
+**silently**. A Steam markup change makes them return zero rows or `None`
+rather than raising, and the result would be a shipped column quietly going
+blank or, worse, filling with wrong values. The fixtures pin the shapes that
+were observed live.
+
+Locally without Docker: `pip install -e "./backend[dev]" && pytest` from the
+repo root.
 
 ## Project phases
 
@@ -250,11 +320,16 @@ $env:NEXT_PUBLIC_API_URL="http://localhost:8000"; npm run dev
 3. ✅ Steam data collector — `docker compose run --rm collector`
 4. ✅ Public market intelligence collector — `docker compose run --rm market`
    (or run the whole chain: `docker compose run --rm pipeline`)
-5. ✅ REST API — http://localhost:8000/docs (`/api/v1/games`, dashboard, filters)
-6. ✅ Frontend dashboard — http://localhost:3000 (`cd frontend && npm run dev` locally)
+5. ✅ REST API — http://localhost:9100/docs (`/api/v1/games`, dashboard, filters)
+6. ✅ Frontend dashboard — http://localhost:4000 (`cd frontend && npm run dev` locally)
 7. ✅ Charts & analytics — dashboard analytics grid + per-game stats history
 8. ✅ Export system — CSV / Excel / JSON / Markdown of the current filtered view
    (buttons above the table, or `GET /api/v1/export?format=csv&...`); copies land in `exports/`
 9. ✅ Community videos — lazy per-game YouTube/Twitch galleries with view
    counts, developer channel submissions + admin review (`/admin/submissions`),
    website/channel discovery workers (`websites`, `scanner`, `video_prefetch`)
+10. ✅ First-party demand signals — community-hub followers + 14-day delta,
+    Valve Top-Wishlists rank, and developer-disclosed wishlist counts
+    harvested from Steam news (`followers`, `rank_sweep`, `disclosures`).
+    Third-party estimate vendors retired: the wishlist column shows a
+    confirmed disclosure or Unknown, never a derived figure.

@@ -33,3 +33,6 @@ Thumbs.db
 # Internal prompt/spec notes - never published
 promt.md
 promt.txt
+
+# TypeScript incremental build cache
+*.tsbuildinfo

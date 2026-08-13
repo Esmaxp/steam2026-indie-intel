@@ -8,7 +8,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
 
-    database_url: str = "postgresql+asyncpg://steam:steam@localhost:5432/steam2026"
+    # Local (non-Docker) fallback: 9432 is the host port the db container publishes.
+    database_url: str = "postgresql+asyncpg://steam:steam@localhost:9432/steam2026"
 
     exports_dir: str = "/data/exports"
     logs_dir: str = "/data/logs"
@@ -23,9 +24,9 @@ class Settings(BaseSettings):
     youtube_daily_quota: int = 8000
     twitch_daily_quota: int = 50000
     video_cache_ttl_hours: int = 24
-    # Submission-form protection + admin review access.
+    # Submission-form protection. Admin routes are unauthenticated for now
+    # — see app.api.v1.videos.require_admin.
     submission_cooldown_minutes: int = 10
-    admin_token: str = ""
 
     # Optional AI-based 2D/3D classification (workers/classify_dimension_vision
     # reads a screenshot; workers/classify_dimension_similarity reasons from

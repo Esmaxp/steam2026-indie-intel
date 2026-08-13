@@ -37,9 +37,10 @@ alembic_revision: $REVISION
 dump_size: $SIZE
 restore: docker compose run --rm db_restore
 then:    docker compose run --rm backend alembic upgrade head
-note: prices/reviews/estimates are only as fresh as exported_at; run
-      'docker compose run --rm refresher' for current stats, or 'pipeline'
-      to re-discover games released since this snapshot.
+note: prices, reviews, followers and wishlist ranks are only as fresh as
+      exported_at. Run 'docker compose run --rm refresher' for current
+      stats, 'followers' and 'rank_sweep' for current demand signals, or
+      'pipeline' to re-discover games released since this snapshot.
 EOF
 
 echo "Wrote $DUMP ($SIZE, $GAMES games, revision: $REVISION)"

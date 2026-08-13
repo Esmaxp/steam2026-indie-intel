@@ -3,15 +3,19 @@ import type {
   ChannelSubmissionOut,
   DashboardSummary,
   FilterOptions,
+  FollowerPoint,
   GameDetail,
   GameListItem,
   GameVideosPayload,
   Page,
+  RankPoint,
   StatsPoint,
+  SweepOut,
+  SweepRequestBody,
 } from "@/lib/types";
 
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:9100";
 
 async function getJson<T>(path: string, params?: URLSearchParams): Promise<T> {
   const qs = params && params.size > 0 ? `?${params.toString()}` : "";
@@ -42,6 +46,14 @@ export function fetchSimilarGames(appid: number, limit = 10) {
 
 export function fetchGameStats(appid: number) {
   return getJson<StatsPoint[]>(`/api/v1/games/${appid}/stats`);
+}
+
+export function fetchGameFollowers(appid: number) {
+  return getJson<FollowerPoint[]>(`/api/v1/games/${appid}/followers`);
+}
+
+export function fetchGameRankHistory(appid: number) {
+  return getJson<RankPoint[]>(`/api/v1/games/${appid}/rank-history`);
 }
 
 export function fetchSummary() {
@@ -79,25 +91,22 @@ export function submitGameChannels(appid: number, body: ChannelSubmissionBody) {
   return postJson<{ status: string }>(`/api/v1/games/${appid}/channel-submissions`, body);
 }
 
-export function fetchSubmissions(token: string, status = "pending") {
-  return fetch(`${API_BASE}/api/v1/admin/channel-submissions?status=${status}`, {
-    headers: { "X-Admin-Token": token },
-  }).then(async (res) => {
+// Admin routes are unauthenticated for now — see backend require_admin().
+export function fetchSubmissions(status = "pending") {
+  return fetch(`${API_BASE}/api/v1/admin/channel-submissions?status=${status}`).then(async (res) => {
     if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `API ${res.status}`);
     return res.json() as Promise<ChannelSubmissionOut[]>;
   });
 }
 
-export function reviewSubmission(token: string, id: number, action: "approve" | "reject", note = "") {
+export function reviewSubmission(id: number, action: "approve" | "reject", note = "") {
   return postJson<ChannelSubmissionOut>(
     `/api/v1/admin/channel-submissions/${id}/${action}`,
     { note },
-    { "X-Admin-Token": token },
   );
 }
 
 export function bulkReviewSubmissions(
-  token: string,
   ids: number[],
   action: "approve" | "reject",
   note = "",
@@ -105,6 +114,20 @@ export function bulkReviewSubmissions(
   return postJson<{ processed: number[]; skipped: number[] }>(
     "/api/v1/admin/channel-submissions/bulk-review",
     { ids, action, note },
-    { "X-Admin-Token": token },
   );
+}
+
+export function fetchSweeps() {
+  return fetch(`${API_BASE}/api/v1/admin/sweeps`).then(async (res) => {
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `API ${res.status}`);
+    return res.json() as Promise<SweepOut[]>;
+  });
+}
+
+export function startSweep(body: SweepRequestBody) {
+  return postJson<SweepOut>("/api/v1/admin/sweeps", body);
+}
+
+export function cancelSweep(id: number) {
+  return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/cancel`, {});
 }

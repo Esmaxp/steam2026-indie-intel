@@ -22,11 +22,14 @@ Core principles:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Data Sources                             │
+│                  Data Sources — Valve first-party                │
 │  Steam App List API · Steam Store API · Steam Store Pages       │
 │  Steam Search · Steam News · Steam Events                       │
-│  SteamDB · Steam Charts · VG Insights · Gamalytic ·             │
-│  GameDiscoverCo · Kickstarter · Press / Dev blogs (public only) │
+│  Steam Top-Wishlists chart · Steam community hubs (followers)   │
+├─────────────────────────────────────────────────────────────────┤
+│  Labelled non-Valve exceptions (badged as such in the UI):      │
+│  SteamCharts — concurrent players, a measurement not a model    │
+│  YouTube / Twitch — community clips; content, not demand data   │
 └───────────────┬─────────────────────────────────────────────────┘
                 │  aiohttp (+ Playwright only when unavoidable)
 ┌───────────────▼───────────────┐
@@ -37,9 +40,10 @@ Core principles:
                 │  SQLAlchemy (async)
 ┌───────────────▼───────────────┐
 │   PostgreSQL (normalized)     │  games · developers · publishers
-│   Alembic migrations          │  genres · tags · stats · revenue
-│                               │  wishlist · marketing · festivals
-└───────────────┬───────────────┘  media · sync_states
+│   Alembic migrations          │  genres · tags · steam_stats
+│                               │  follower_snapshots · wishlist_rank_*
+└───────────────┬───────────────┘  wishlist · marketing · festivals
+                                   media · sync_states
                 │
 ┌───────────────▼───────────────┐      ┌──────────────────────────┐
 │   backend/  FastAPI REST API  │◄─────┤ exports/ CSV·XLSX·JSON·MD │
@@ -49,7 +53,7 @@ Core principles:
 ┌───────────────▼───────────────┐
 │   frontend/  Next.js + TS     │  Dashboard · Table · Filters
 │   Tailwind · shadcn/ui        │  Game detail pages · Charts
-│   TanStack Table · Recharts   │  http://localhost:3000
+│   TanStack Table · Recharts   │  http://localhost:4000
 └───────────────────────────────┘
 ```
 
@@ -174,12 +178,50 @@ If no public source exists, the value stays `NULL` with status `unknown`.
 - `id` PK, `appid` FK, `captured_at`
 - `positive_reviews`, `negative_reviews`, `total_reviews`, `positive_pct`,
   `review_score`, `review_score_desc`
-- `peak_ccu`, `avg_ccu`, `followers` (NULL when not publicly available)
+- `peak_ccu`, `avg_ccu` (NULL when not publicly available)
+- `followers` — vestigial; superseded by `follower_snapshots` and dropped in
+  a later migration. Its only writer was the retired Gamalytic path.
 - `source_name`, `source_url`
+
+**follower_snapshots** — append-only, MEASURED community-hub member counts
+- `id` PK, `appid` FK, `captured_at`, `followers` NOT NULL
+- `source_name`, `source_url`
+- Separate from `steam_stats` on purpose: `latest_stats_sq()` is
+  `DISTINCT ON (appid) ORDER BY captured_at DESC`, so a follower-only row on
+  the daily follower cadence would become "the latest stats row" and blank
+  reviews/CCU for that game. The two run on different cadences (followers:
+  daily, upcoming games; reviews/CCU: market queue, released games) and
+  cannot share a DISTINCT-ON table.
+
+**wishlist_rank_sweeps** — one row per Top-Wishlists sweep run
+- `id` PK, `started_at`, `finished_at`, `cc` (region is part of the
+  observation), `total_count`, `rows_ingested`, `status`, `source_url`, `notes`
+- `status` CHECK in (complete, partial, failed). The header exists so a
+  truncated sweep cannot pass as a complete one: consumers read rank only
+  from `complete` sweeps, otherwise an aborted run reads as "everything below
+  rank N left the chart" and fabricates enormous deltas.
+
+**wishlist_rank_entries** — a game's ordinal position in one sweep
+- `id` PK, `sweep_id` FK CASCADE, `appid`, `rank`, `name`
+- UNIQUE (sweep_id, appid); INDEX (appid, sweep_id)
+- `appid` deliberately has **no FK** to `games` — the chart is a global
+  ~5.2k-row list across all of Steam while this catalogue is indie-only, so
+  an FK would discard most rows and prevent backfilling rank history for a
+  game discovered later. Consumers INNER JOIN to `games`.
+- A rank is an ORDER, not a count. Valve blends total wishlists with recent
+  velocity, so no wishlist count may be derived from it.
 
 **wishlist_records** — append-only, provenance-tracked
 - `id` PK, `appid` FK, `status` data_status, `wishlist_count` (nullable),
+  `comparator` ('=' | '>='), `disclosed_on` (the announcement's own date, as
+  distinct from `recorded_at` = ingestion time),
   `source_name`, `source_url`, `recorded_at`, `notes`
+- Only ever `confirmed` (a developer stated the figure publicly) or
+  `unknown`. No wishlist estimate is computed for any game.
+- `comparator` is load-bearing: ~93% of harvested disclosures are round-number
+  lower bounds ("over 100,000"), and recording those as exact would overstate
+  what was said. Partial UNIQUE (appid, source_url, wishlist_count) WHERE
+  source_url IS NOT NULL makes the harvester re-runnable.
 
 **revenue_records** — append-only, provenance-tracked
 - `id` PK, `appid` FK, `status` data_status
@@ -205,7 +247,14 @@ If no public source exists, the value stays `NULL` with status `unknown`.
 
 Indexes: `games.name` (trigram via `pg_trgm` for fast ILIKE search),
 `games.release_date`, `games.engine`, `games.dimension`, FK columns on all
-child tables, `steam_stats (appid, captured_at DESC)`.
+child tables, `steam_stats (appid, captured_at DESC)`,
+`follower_snapshots (appid, captured_at)`, `wishlist_rank_entries (appid, sweep_id)`.
+
+**Sort order caveat:** the `data_status` enum cannot be ordered on directly.
+`conflicting` was appended with `ALTER TYPE ADD VALUE` (migration 0003), so
+PostgreSQL sorts it *after* `unknown` rather than ahead of it — a stale
+`unknown` row would beat a fresh `conflicting` one. `games_query.status_priority()`
+supplies the intended order as a CASE expression; use it, never the raw column.
 
 ---
 
@@ -270,6 +319,11 @@ uncertain stays `unknown`.
 | 6     | Frontend dashboard (Next.js)               | ✅ |
 | 7     | Charts and analytics                       | ✅ |
 | 8     | Export system (CSV/Excel/JSON/Markdown)    | ✅ |
+| 9     | Community videos (per-game YouTube/Twitch galleries) | ✅ |
+| 10    | First-party demand signals — followers, Top-Wishlists rank, developer disclosures; third-party estimate vendors retired | ✅ |
+
+Phase 10 adds four on-demand services: `followers`, `rank_sweep`,
+`disclosures` and `tests`. All are keyless except the video ones.
 
 Each phase is committed before the next one starts.
 
@@ -279,12 +333,12 @@ Each phase is committed before the next one starts.
 
 ```bash
 docker compose up --build
-# → PostgreSQL on :5432, migrations applied automatically,
-#   FastAPI on http://localhost:8000  (GET /health, GET /docs)
+# → PostgreSQL on :9432, migrations applied automatically,
+#   FastAPI on http://localhost:9100  (GET /health, GET /docs)
 ```
 
 Frontend joins Docker Compose in Phase 6 and will serve
-`http://localhost:3000`.
+`http://localhost:4000`.
 
 ---
 
@@ -300,20 +354,44 @@ label), **low** (publisher matches the known AAA/AA list → also
 any 30-day window get `low_quality_signal=true` on all their games
 (mass-publishing / asset-flip pattern) — surfaced as a filter, not removed.
 
-### Revenue: multi-source cross-validation
+### Demand signals: measured, not modelled
 
-Raw layer `revenue_estimates`: one row per (game, source, fetch) — sources
-are `gamalytic` (API-key gated), `steamspy` (owners ranges, free API),
-`vginsights` (public pages; currently an authenticated SPA → honest Unknown),
-`disclosed` (human-verified figures via CLI, always Confirmed). Every row
-carries `source_url` + `retrieved_at`.
+Steam publishes no wishlist counts, and no third-party estimate of one has
+ever been validated in public against a real Steamworks number. The project
+therefore reports what Valve does publish, and refuses to derive the rest:
 
-Summary layer `revenue_records` (what the UI shows):
+| Signal | Source | Status |
+|---|---|---|
+| Followers | community hub member count | measured, exact |
+| Followers Δ14d | our own snapshots, differenced | measured |
+| Wishlist rank | Steam Top-Wishlists chart | measured ordinal |
+| Wishlist count | developer's own announcement | `confirmed`, else `unknown` |
+
+**No wishlist number or range is ever derived.** A followers×k figure with a
+constant k is a monotone transform of a column already on screen — zero added
+information — and with a genre-varying k it reorders games on a coefficient
+whose within-genre dispersion is unpublished. The observed wishlist/follower
+ratio spans roughly 7.5×–30× and does not tighten with scale.
+
+Disclosures are harvested from official Steam news
+(`workers/harvest_disclosures.py`) and written only at `confirmed`, with the
+announcement URL and its own date. Because that is the highest trust tier, the
+harvester defaults to a dry run and requires `--write`.
+
+### Revenue: no first-party source, honestly unknown
+
+The third-party estimate vendors (Gamalytic, SteamSpy, VG Insights) were
+retired and their rows deleted in migration 0013 — of 8,380 rows, 0 carried
+revenue, 0 carried sales, and 99.8% were the 0–20,000 owners bucket. Revenue
+now has no source at all and reports `unknown` for every game.
+
+`revenue_estimates` / `revenue_records` and `revenue_merge.merge_estimates()`
+remain, because `disclosed_numbers_source.py` still routes human-verified
+developer figures through them:
 1. A Confirmed disclosure wins outright.
 2. One estimate → passed through as `estimated`.
 3. 2+ estimates → **median**; `estimate_spread = (max−min)/median`;
    spread > 0.5 → status **conflicting**, all sources listed and linked.
-   Owners merge as min-of-mins .. max-of-maxes.
 
 ### Budget: two labeled heuristics, never fact
 

@@ -25,7 +25,8 @@ def _enum_value(value) -> str:
 
 
 def _provenanced(
-    value, status, source_name=None, source_url=None, recorded_at=None, spread=None
+    value, status, source_name=None, source_url=None, recorded_at=None, spread=None,
+    comparator="=", disclosed_on=None,
 ) -> Provenanced:
     return Provenanced(
         value=float(value) if value is not None else None,
@@ -34,6 +35,8 @@ def _provenanced(
         source_url=source_url,
         recorded_at=recorded_at,
         estimate_spread=float(spread) if spread is not None else None,
+        comparator=comparator or "=",
+        disclosed_on=disclosed_on,
     )
 
 
@@ -73,9 +76,19 @@ def row_to_list_item(row) -> GameListItem:
         review_score_desc=row.review_score_desc,
         peak_ccu=row.peak_ccu,
         avg_ccu=float(row.avg_ccu) if row.avg_ccu is not None else None,
+        followers=row.followers,
+        followers_captured_at=row.followers_captured_at,
+        follower_delta_14d=row.follower_delta,
+        follower_delta_14d_pct=(
+            float(row.follower_delta_pct) if row.follower_delta_pct is not None else None
+        ),
+        wishlist_rank=row.wishlist_rank,
+        wishlist_ranked=row.wishlist_rank is not None,
+        rank_delta_7d=row.rank_delta,
         wishlist=_provenanced(
             row.wishlist_count, row.wishlist_status, row.wishlist_source,
             row.wishlist_source_url, row.wishlist_recorded_at,
+            comparator=row.wishlist_comparator, disclosed_on=row.wishlist_disclosed_on,
         ),
         revenue=_provenanced(
             row.revenue_gross, row.revenue_status, row.revenue_source,
@@ -83,9 +96,6 @@ def row_to_list_item(row) -> GameListItem:
             spread=row.revenue_spread,
         ),
         estimated_sales=row.estimated_sales,
-        budget=_provenanced(
-            row.budget_value, row.budget_status, row.budget_source, row.budget_source_url,
-        ),
         video_count=row.video_count,
     )
 
@@ -181,6 +191,8 @@ def build_detail(
             WishlistRecordOut(
                 status=_enum_value(w.status),
                 wishlist_count=w.wishlist_count,
+                comparator=w.comparator or "=",
+                disclosed_on=w.disclosed_on,
                 source_name=w.source_name,
                 source_url=w.source_url,
                 recorded_at=w.recorded_at,

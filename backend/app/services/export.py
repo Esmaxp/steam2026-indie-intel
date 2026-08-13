@@ -57,7 +57,22 @@ def _flatten(item: GameListItem) -> dict:
         "review_score": item.review_score_desc,
         "peak_ccu": item.peak_ccu,
         "avg_ccu": item.avg_ccu,
+        # Measured first-party signals. Exports carry raw values — the
+        # rounding applied in the UI is a display rule, not a data rule.
+        "followers": item.followers,
+        # ISO string, matching how this file already emits dates. A tz-aware
+        # datetime object cannot be written to .xlsx at all — openpyxl raises.
+        "followers_captured_at": (
+            item.followers_captured_at.isoformat() if item.followers_captured_at else None
+        ),
+        "follower_delta_14d": item.follower_delta_14d,
+        "wishlist_rank": item.wishlist_rank,
+        "rank_delta_7d": item.rank_delta_7d,
         "wishlist": item.wishlist.value,
+        "wishlist_comparator": item.wishlist.comparator,
+        "wishlist_disclosed_on": (
+            item.wishlist.disclosed_on.isoformat() if item.wishlist.disclosed_on else None
+        ),
         "wishlist_status": item.wishlist.status,
         "wishlist_source": item.wishlist.source_name,
         "revenue_usd": item.revenue.value,
@@ -65,8 +80,6 @@ def _flatten(item: GameListItem) -> dict:
         "revenue_source": item.revenue.source_name,
         "revenue_estimate_spread": item.revenue.estimate_spread,
         "estimated_sales": item.estimated_sales,
-        "budget_usd": item.budget.value,
-        "budget_status": item.budget.status,
         "steam_url": item.steam_store_url,
         "steamdb_url": item.steamdb_url,
     }
@@ -87,8 +100,14 @@ def _to_markdown(df: pd.DataFrame) -> str:
     intro = (
         "# Steam 2026 Indie Games Export\n\n"
         f"Generated {generated} — {len(df)} games. "
-        "Wishlist/revenue/budget carry a status column: confirmed / estimated / "
-        "unknown (empty value = unknown, never a guess).\n\n"
+        "`followers` and `wishlist_rank` are MEASURED values Valve publishes. "
+        "`wishlist_rank` is a position on Valve's Top-Wishlists chart, which "
+        "blends total wishlists with recent velocity — it is not a count, and "
+        "no count can be derived from it; empty means the game is not on the "
+        "chart. `wishlist` is populated only where a developer disclosed a "
+        "figure, and `wishlist_comparator` is `>=` when they stated a lower "
+        "bound. Wishlist/revenue carry a status column: confirmed / estimated "
+        "/ unknown (empty value = unknown, never a guess).\n\n"
     )
     return intro + "\n".join([header, divider, *rows]) + "\n"
 

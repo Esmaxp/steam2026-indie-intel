@@ -1,9 +1,9 @@
 """Shared query builder for the games list, dashboard and (Phase 8) exports.
 
 Latest-per-game values come from PostgreSQL DISTINCT ON subqueries.
-Wishlist/revenue "latest" prefers confirmed over estimated records
-(the data_status enum is ordered confirmed < estimated < unknown),
-then the most recent observation.
+Wishlist/revenue "latest" prefers confirmed over estimated records, then
+the most recent observation — see status_priority() for why that preference
+cannot be expressed by ordering on the enum column itself.
 """
 
 from dataclasses import dataclass
@@ -16,6 +16,7 @@ from app.models import (
     Developer,
     Dimension,
     Festival,
+    FollowerSnapshot,
     Game,
     GameEngine,
     Genre,
@@ -27,6 +28,8 @@ from app.models import (
     SteamStats,
     Tag,
     VideoCache,
+    WishlistRankEntry,
+    WishlistRankSweep,
     WishlistRecord,
     game_festivals,
 )
@@ -41,12 +44,39 @@ def latest_stats_sq():
     )
 
 
+def status_priority(col):
+    """Preference order for provenance-carrying records: best status first.
+
+    The data_status enum CANNOT be ordered on directly. `conflicting` was
+    appended with ALTER TYPE ADD VALUE (migration 0003), so PostgreSQL sorts
+    it *after* `unknown` (confirmed=1, estimated=2, unknown=3, conflicting=4)
+    rather than ahead of it. Ordering by the raw column therefore lets a
+    stale `unknown` row beat a fresh `conflicting` one — silently, and with
+    no error. This CASE fixes the order without rebuilding the enum, which
+    would touch five columns across four tables.
+    """
+    return sa.case(
+        (col == DataStatus.CONFIRMED, 0),
+        (col == DataStatus.ESTIMATED, 1),
+        (col == DataStatus.CONFLICTING, 2),
+        else_=3,  # unknown, and NULL, last
+    )
+
+
 def latest_wishlist_sq():
     return (
         sa.select(WishlistRecord)
         .distinct(WishlistRecord.appid)
         .order_by(
-            WishlistRecord.appid, WishlistRecord.status, WishlistRecord.recorded_at.desc()
+            WishlistRecord.appid,
+            status_priority(WishlistRecord.status),
+            # disclosed_on before recorded_at: a harvest ingests a game's
+            # whole milestone history in ONE transaction, so every row shares
+            # recorded_at and it cannot break the tie. Ordering on it alone
+            # surfaced an arbitrary row -- a game that had announced 50,000
+            # displayed its oldest 20,000 milestone.
+            WishlistRecord.disclosed_on.desc().nullslast(),
+            WishlistRecord.recorded_at.desc(),
         )
         .subquery("latest_wishlist")
     )
@@ -57,10 +87,64 @@ def latest_revenue_sq():
         sa.select(RevenueRecord)
         .distinct(RevenueRecord.appid)
         .order_by(
-            RevenueRecord.appid, RevenueRecord.status, RevenueRecord.recorded_at.desc()
+            RevenueRecord.appid,
+            status_priority(RevenueRecord.status),
+            RevenueRecord.recorded_at.desc(),
         )
         .subquery("latest_revenue")
     )
+
+
+FOLLOWER_DELTA_DAYS = 14
+RANK_DELTA_DAYS = 7
+
+
+def latest_followers_sq():
+    return (
+        sa.select(FollowerSnapshot)
+        .distinct(FollowerSnapshot.appid)
+        .order_by(FollowerSnapshot.appid, FollowerSnapshot.captured_at.desc())
+        .subquery("latest_followers")
+    )
+
+
+def prior_followers_sq(days: int = FOLLOWER_DELTA_DAYS):
+    """Newest snapshot AT LEAST `days` old — not "the snapshot from `days`
+    ago". Collection cadence drifts, so an exact-date match would return
+    NULL for most games most of the time."""
+    cutoff = sa.func.now() - sa.text(f"interval '{int(days)} days'")
+    return (
+        sa.select(FollowerSnapshot)
+        .distinct(FollowerSnapshot.appid)
+        .where(FollowerSnapshot.captured_at <= cutoff)
+        .order_by(FollowerSnapshot.appid, FollowerSnapshot.captured_at.desc())
+        .subquery("prior_followers")
+    )
+
+
+def _complete_sweep_entries(max_started_at=None):
+    """Entries from the newest COMPLETE sweep (optionally, the newest one at
+    least as old as `max_started_at`).
+
+    Partial sweeps are excluded on purpose: a run aborted by rate limiting
+    holds only the head of the chart, so differencing against it would read
+    as "everything below rank N left the chart" and manufacture enormous
+    fake deltas.
+    """
+    sweeps = sa.select(WishlistRankSweep.id).where(WishlistRankSweep.status == "complete")
+    if max_started_at is not None:
+        sweeps = sweeps.where(WishlistRankSweep.started_at <= max_started_at)
+    sweep_id = sweeps.order_by(WishlistRankSweep.started_at.desc()).limit(1).scalar_subquery()
+    return sa.select(WishlistRankEntry).where(WishlistRankEntry.sweep_id == sweep_id)
+
+
+def latest_rank_sq():
+    return _complete_sweep_entries().subquery("latest_rank")
+
+
+def prior_rank_sq(days: int = RANK_DELTA_DAYS):
+    cutoff = sa.func.now() - sa.text(f"interval '{int(days)} days'")
+    return _complete_sweep_entries(max_started_at=cutoff).subquery("prior_rank")
 
 
 def video_counts_sq():
@@ -105,8 +189,11 @@ class GameFilters:
     min_reviews: int | None = None
     min_positive_pct: float | None = None
     min_peak_ccu: int | None = None
-    min_wishlist: int | None = None
     min_revenue: float | None = None
+    min_followers: int | None = None
+    # True = only games on Valve's wishlist chart; False = only those off it.
+    ranked_only: bool | None = None
+    max_wishlist_rank: int | None = None
     wishlist_status: DataStatus | None = None
     revenue_status: DataStatus | None = None
     indie_confidence: IndieConfidence | None = None
@@ -122,9 +209,18 @@ class GamesQuery:
 
 def build_games_query(f: GameFilters) -> GamesQuery:
     ls, lw, lr = latest_stats_sq(), latest_wishlist_sq(), latest_revenue_sq()
+    lf, pf = latest_followers_sq(), prior_followers_sq()
+    lrk, prk = latest_rank_sq(), prior_rank_sq()
     nf = next_fest_exists()
     vc = video_counts_sq()
     video_count = sa.func.coalesce(vc.c.video_count, 0)
+
+    # Derived in the SELECT, never stored: both are pure functions of two
+    # rows, so materialising them would create a staleness class this schema
+    # does not otherwise have.
+    follower_delta = lf.c.followers - pf.c.followers
+    # Positive = moved UP the chart (rank 40 -> 12 is +28).
+    rank_delta = prk.c.rank - lrk.c.rank
 
     stmt = (
         sa.select(
@@ -139,6 +235,8 @@ def build_games_query(f: GameFilters) -> GamesQuery:
             lw.c.source_name.label("wishlist_source"),
             lw.c.source_url.label("wishlist_source_url"),
             lw.c.recorded_at.label("wishlist_recorded_at"),
+            lw.c.comparator.label("wishlist_comparator"),
+            lw.c.disclosed_on.label("wishlist_disclosed_on"),
             lr.c.gross_revenue_usd.label("revenue_gross"),
             lr.c.estimated_sales.label("estimated_sales"),
             lr.c.estimate_spread.label("revenue_spread"),
@@ -151,12 +249,29 @@ def build_games_query(f: GameFilters) -> GamesQuery:
             MarketingInfo.source_name.label("budget_source"),
             MarketingInfo.source_url.label("budget_source_url"),
             nf.label("next_fest"),
+            # --- first-party measured demand signals -----------------------
+            lf.c.followers.label("followers"),
+            lf.c.captured_at.label("followers_captured_at"),
+            lf.c.source_url.label("followers_source_url"),
+            follower_delta.label("follower_delta"),
+            (follower_delta * 100.0 / sa.func.nullif(pf.c.followers, 0)).label(
+                "follower_delta_pct"
+            ),
+            lrk.c.rank.label("wishlist_rank"),
+            rank_delta.label("rank_delta"),
             video_count.label("video_count"),
         )
         .outerjoin(ls, ls.c.appid == Game.appid)
         .outerjoin(lw, lw.c.appid == Game.appid)
         .outerjoin(lr, lr.c.appid == Game.appid)
         .outerjoin(MarketingInfo, MarketingInfo.appid == Game.appid)
+        .outerjoin(lf, lf.c.appid == Game.appid)
+        .outerjoin(pf, pf.c.appid == Game.appid)
+        # INNER-JOIN semantics would drop every unranked game; the chart is a
+        # global ~5.2k list and most of this catalogue is not on it, so these
+        # must stay outer joins and "not ranked" must read as NULL.
+        .outerjoin(lrk, lrk.c.appid == Game.appid)
+        .outerjoin(prk, prk.c.appid == Game.appid)
         .outerjoin(vc, vc.c.appid == Game.appid)
     )
 
@@ -209,10 +324,14 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         conds.append(ls.c.positive_pct >= f.min_positive_pct)
     if f.min_peak_ccu is not None:
         conds.append(ls.c.peak_ccu >= f.min_peak_ccu)
-    if f.min_wishlist is not None:
-        conds.append(lw.c.wishlist_count >= f.min_wishlist)
     if f.min_revenue is not None:
         conds.append(lr.c.gross_revenue_usd >= f.min_revenue)
+    if f.min_followers is not None:
+        conds.append(lf.c.followers >= f.min_followers)
+    if f.ranked_only is not None:
+        conds.append(lrk.c.rank.is_not(None) if f.ranked_only else lrk.c.rank.is_(None))
+    if f.max_wishlist_rank is not None:
+        conds.append(lrk.c.rank <= f.max_wishlist_rank)
     if f.wishlist_status is not None:
         if f.wishlist_status is DataStatus.UNKNOWN:
             # Unknown = no record at all, or an explicit unknown record.
@@ -242,8 +361,18 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         "reviews": ls.c.total_reviews,
         "positive_pct": ls.c.positive_pct,
         "peak_ccu": ls.c.peak_ccu,
-        "wishlist": lw.c.wishlist_count,
-        "revenue": lr.c.gross_revenue_usd,
+        # No `wishlist` or `revenue` sort key. Both columns end up all-NULL:
+        # wishlist carries only developer disclosures (mostly ">=" lower
+        # bounds, which do not order meaningfully), and migration 0013 deletes
+        # every vendor revenue row — the retired SteamSpy rows carried 0
+        # revenue values across 8,380 rows anyway.
+        "followers": lf.c.followers,
+        "follower_delta_14d": follower_delta,
+        # NB: ascending is BETTER for rank (1 is the top of the chart), unlike
+        # every other key here. Callers wanting "best first" pass "wishlist_rank",
+        # not "-wishlist_rank".
+        "wishlist_rank": lrk.c.rank,
+        "rank_delta_7d": rank_delta,
         "videos": video_count,
     }
     sort_key = f.sort or "-release_date"

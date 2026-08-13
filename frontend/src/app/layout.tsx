@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans antialiased">
         <Providers>
           <header className="border-b border-hairline bg-surface">
-            <div className="mx-auto flex max-w-[1400px] items-center gap-4 px-6 py-4">
+            <div className="flex w-full items-center gap-4 px-6 py-4">
               <Link href="/" className="text-lg font-semibold tracking-tight">
                 Steam 2026 <span className="text-accent">Indie Intelligence</span>
               </Link>
@@ -27,6 +27,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               >
                 Community
               </Link>
+              {/* Both admin pages prompt for ADMIN_TOKEN and show nothing
+                  without it, so linking them costs no access — and without a
+                  link they are reachable only by typing the URL. */}
+              <Link
+                href="/admin/sweeps"
+                className="text-sm text-ink2 transition-colors hover:text-ink"
+              >
+                Data sweeps
+              </Link>
+              <Link
+                href="/admin/submissions"
+                className="text-sm text-ink2 transition-colors hover:text-ink"
+              >
+                Submissions
+              </Link>
               <span className="ml-auto text-xs text-muted">
                 Wishlist &amp; revenue are never exposed by Steam — values are
                 Confirmed / Estimated / Unknown, with sources.
@@ -34,7 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <SocialLinks />
             </div>
           </header>
-          <main className="mx-auto max-w-[1400px] px-6 py-6">{children}</main>
+          <main className="w-full px-6 py-6">{children}</main>
         </Providers>
       </body>
     </html>

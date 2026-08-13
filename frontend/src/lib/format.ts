@@ -36,7 +36,12 @@ export function fmtPct(value: number | null | undefined): string {
 
 export function fmtDate(iso: string | null | undefined, raw?: string | null): string {
   if (!iso) return raw || DASH;
-  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", {
+  // Date-only values ("2026-08-12") get an explicit local midnight so they do
+  // not shift a day in negative UTC offsets. Full timestamps are already an
+  // instant and must be parsed as-is — appending to one yields Invalid Date.
+  const date = new Date(iso.includes("T") ? iso : `${iso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return raw || DASH;
+  return date.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -49,6 +54,27 @@ export function fmtCompact(value: number | null | undefined): string {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+/** Signed delta, with an explicit DASH when the value is unknown.
+ *  Critically distinguishes "no measurement yet" (DASH) from "no change" (0):
+ *  a follower delta reads DASH until two snapshots exist, never 0. */
+export function fmtDelta(value: number | null | undefined): string {
+  if (value === null || value === undefined) return DASH;
+  if (value === 0) return "0";
+  return `${value > 0 ? "+" : ""}${new Intl.NumberFormat("en-US").format(value)}`;
+}
+
+/** A developer-disclosed wishlist figure. Most disclosures are round-number
+ *  lower bounds ("over 100,000"), so the comparator is rendered — dropping it
+ *  would present a bound as an exact count. */
+export function fmtWishlist(
+  value: number | null | undefined,
+  comparator?: string,
+): string {
+  if (value === null || value === undefined) return DASH;
+  const prefix = comparator === ">=" ? "≥ " : "";
+  return prefix + fmtCompact(value);
 }
 
 const LABELS: Record<string, string> = {
