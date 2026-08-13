@@ -10,6 +10,8 @@ import type {
   Page,
   RankPoint,
   StatsPoint,
+  SweepOut,
+  SweepRequestBody,
 } from "@/lib/types";
 
 export const API_BASE =
@@ -117,4 +119,21 @@ export function bulkReviewSubmissions(
     { ids, action, note },
     { "X-Admin-Token": token },
   );
+}
+
+export function fetchSweeps(token: string) {
+  return fetch(`${API_BASE}/api/v1/admin/sweeps`, {
+    headers: { "X-Admin-Token": token },
+  }).then(async (res) => {
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `API ${res.status}`);
+    return res.json() as Promise<SweepOut[]>;
+  });
+}
+
+export function startSweep(token: string, body: SweepRequestBody) {
+  return postJson<SweepOut>("/api/v1/admin/sweeps", body, { "X-Admin-Token": token });
+}
+
+export function cancelSweep(token: string, id: number) {
+  return postJson<SweepOut>(`/api/v1/admin/sweeps/${id}/cancel`, {}, { "X-Admin-Token": token });
 }

@@ -19,7 +19,11 @@
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      # Repo-root context: the API runs the collectors in-process for
+      # admin-triggered sweeps, so it needs scraper/ and workers/.
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-steam}:${POSTGRES_PASSWORD:-steam}@db:5432/${POSTGRES_DB:-steam2026}

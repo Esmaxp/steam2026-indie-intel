@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import datetime
 import os
+from collections.abc import Awaitable, Callable
 
 import sqlalchemy as sa
 
@@ -50,10 +51,20 @@ def latest_follower_sq():
 
 
 async def select_stale(
-    min_age_hours: int, limit: int, include_released: bool
+    min_age_hours: int,
+    limit: int,
+    include_released: bool,
+    release_from: datetime.date | None = None,
+    release_to: datetime.date | None = None,
 ) -> list[int]:
     """Games with no follower snapshot or one older than min_age_hours —
-    never-fetched first, then oldest first."""
+    never-fetched first, then oldest first.
+
+    release_from/release_to narrow WHICH GAMES are scanned by release date,
+    so a caller can sweep one slice of the catalogue at a time. Games with no
+    release date are excluded when a window is given, since they cannot be
+    shown to fall inside it.
+    """
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
         hours=min_age_hours
     )
@@ -67,16 +78,33 @@ async def select_stale(
         )
         if not include_released:
             stmt = stmt.where(Game.is_released.is_(False))
+        if release_from is not None:
+            stmt = stmt.where(Game.release_date >= release_from)
+        if release_to is not None:
+            stmt = stmt.where(Game.release_date <= release_to)
         if limit:
             stmt = stmt.limit(limit)
         return list((await db.execute(stmt)).scalars().all())
 
 
 async def run(
-    limit: int, min_age_hours: int, include_released: bool, dry_run: bool, interval: float
+    limit: int,
+    min_age_hours: int,
+    include_released: bool,
+    dry_run: bool,
+    interval: float,
+    release_from: datetime.date | None = None,
+    release_to: datetime.date | None = None,
+    on_progress: "Callable[[dict], Awaitable[None]] | None" = None,
+    should_stop: "Callable[[], Awaitable[bool]] | None" = None,
 ) -> dict:
+    """on_progress/should_stop let a caller (the admin sweep runner) surface
+    live counters and stop a multi-hour run between games. Both are optional,
+    so the CLI path is unchanged."""
     logger = setup_logging("refresh_followers")
-    appids = await select_stale(min_age_hours, limit, include_released)
+    appids = await select_stale(
+        min_age_hours, limit, include_released, release_from, release_to
+    )
     if not appids:
         logger.info("Nothing stale to refresh.")
         return {"selected": 0, "written": 0, "no_group": 0, "failed": 0}
@@ -126,6 +154,21 @@ async def run(
                         "%s/%s scanned — %s written, %s no hub, %s failed",
                         index, len(appids), written, no_group, failed,
                     )
+                    if on_progress is not None:
+                        await on_progress({
+                            "total": len(appids), "processed": index,
+                            "written": written, "no_group": no_group, "failed": failed,
+                        })
+                # Checked between games so a stop lands within one interval
+                # rather than at the end of a multi-hour run.
+                if should_stop is not None and await should_stop():
+                    if not dry_run:
+                        await db.commit()
+                    logger.info("stop requested — ending after %s games", index)
+                    return {
+                        "selected": len(appids), "processed": index, "written": written,
+                        "no_group": no_group, "failed": failed, "stopped": True,
+                    }
             if not dry_run:
                 await db.commit()
 

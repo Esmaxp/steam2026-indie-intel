@@ -291,3 +291,31 @@ export interface FilterOptions {
   data_statuses: string[];
   release_months: number[];
 }
+
+/** An admin-triggered collector run. */
+export type SweepKind = "disclosures" | "followers" | "rank";
+
+export interface SweepOut {
+  id: number;
+  kinds: SweepKind[];
+  /** Release-date window limiting WHICH GAMES are scanned. The rank sweep
+   *  ignores it — that chart is a single global list Valve orders itself. */
+  release_from: string | null;
+  release_to: string | null;
+  limit_per_kind: number | null;
+  status: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted";
+  cancel_requested: boolean;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  /** Per-kind counters, shape depends on the collector. */
+  progress: Record<string, Record<string, number | string | boolean>>;
+  error: string | null;
+}
+
+export interface SweepRequestBody {
+  kinds: SweepKind[];
+  release_from?: string | null;
+  release_to?: string | null;
+  limit_per_kind?: number | null;
+}

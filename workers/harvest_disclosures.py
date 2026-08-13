@@ -24,6 +24,7 @@ import asyncio
 import csv
 import datetime
 import os
+from collections.abc import Awaitable, Callable
 
 import sqlalchemy as sa
 
@@ -37,31 +38,42 @@ from scraper.common.logging import setup_logging
 # The Steam news API is Valve's own and tolerant, but stay polite: this is
 # the same interval market_data uses for the Steam host.
 MIN_INTERVAL = 1.5
+PROGRESS_EVERY = 50
 SOURCE_PREFIX = "Developer announcement"
 
 
-async def select_targets(limit: int, start_appid: int, only_appid: int | None) -> list[int]:
+async def select_targets(
+    limit: int,
+    start_appid: int,
+    only_appid: int | None,
+    release_from: datetime.date | None = None,
+    release_to: datetime.date | None = None,
+) -> list[int]:
     """Upcoming and recently released games, appid order.
 
     Ordering by appid rather than a last-harvested timestamp keeps this
     resumable with --start-appid and needs no extra column: re-running is
     harmless anyway because ingestion is idempotent.
+
+    A release_from/release_to window replaces the default "upcoming or
+    released within a year" rule, so a caller can target one slice of the
+    catalogue instead of all of it.
     """
     async with async_session_factory() as db:
         if only_appid is not None:
             return [only_appid]
-        cutoff = datetime.date.today() - datetime.timedelta(days=365)
-        stmt = (
-            sa.select(Game.appid)
-            .where(
-                Game.appid >= start_appid,
-                sa.or_(
-                    Game.is_released.is_(False),
-                    Game.release_date >= cutoff,
-                ),
+        stmt = sa.select(Game.appid).where(Game.appid >= start_appid)
+        if release_from is None and release_to is None:
+            cutoff = datetime.date.today() - datetime.timedelta(days=365)
+            stmt = stmt.where(
+                sa.or_(Game.is_released.is_(False), Game.release_date >= cutoff)
             )
-            .order_by(Game.appid)
-        )
+        else:
+            if release_from is not None:
+                stmt = stmt.where(Game.release_date >= release_from)
+            if release_to is not None:
+                stmt = stmt.where(Game.release_date <= release_to)
+        stmt = stmt.order_by(Game.appid)
         if limit:
             stmt = stmt.limit(limit)
         return list((await db.execute(stmt)).scalars().all())
@@ -116,9 +128,21 @@ async def persist(rows: list[Disclosure]) -> int:
     return written
 
 
-async def run(limit: int, start_appid: int, only_appid: int | None, write: bool) -> dict:
+async def run(
+    limit: int,
+    start_appid: int,
+    only_appid: int | None,
+    write: bool,
+    release_from: datetime.date | None = None,
+    release_to: datetime.date | None = None,
+    on_progress: "Callable[[dict], Awaitable[None]] | None" = None,
+    should_stop: "Callable[[], Awaitable[bool]] | None" = None,
+) -> dict:
+    """on_progress/should_stop let the admin sweep runner show live counters
+    and stop a long run between games; both are optional so the CLI is
+    unchanged."""
     logger = setup_logging("harvest_disclosures")
-    appids = await select_targets(limit, start_appid, only_appid)
+    appids = await select_targets(limit, start_appid, only_appid, release_from, release_to)
     logger.info(
         "Scanning news for %s games at %.1fs%s",
         len(appids), MIN_INTERVAL, "" if write else " [dry-run]",
@@ -126,9 +150,10 @@ async def run(limit: int, start_appid: int, only_appid: int | None, write: bool)
 
     found: list[Disclosure] = []
     failed = 0
+    stopped = False
     async with make_session() as http:
         client = SteamClient(http, min_interval=MIN_INTERVAL)
-        for appid in appids:
+        for index, appid in enumerate(appids, start=1):
             try:
                 items = await fetch_news_items(client, appid)
             except Exception as exc:  # noqa: BLE001 — one bad game must not end the run
@@ -142,12 +167,28 @@ async def run(limit: int, start_appid: int, only_appid: int | None, write: bool)
                     ", ".join(f"{h.comparator}{h.wishlists} on {h.disclosed_on}" for h in hits),
                 )
             found.extend(hits)
+            if index % PROGRESS_EVERY == 0:
+                logger.info(
+                    "%s/%s scanned — %s disclosures so far", index, len(appids), len(found)
+                )
+                if on_progress is not None:
+                    await on_progress({
+                        "total": len(appids), "processed": index,
+                        "found": len(found),
+                        "games_with_disclosures": len({d.appid for d in found}),
+                        "failed": failed,
+                    })
+            if should_stop is not None and await should_stop():
+                logger.info("stop requested — ending after %s games", index)
+                stopped = True
+                break
 
     summary = {
         "scanned": len(appids),
         "games_with_disclosures": len({d.appid for d in found}),
         "disclosures": len(found),
         "failed": failed,
+        "stopped": stopped,
     }
     if write:
         summary["written"] = await persist(found)

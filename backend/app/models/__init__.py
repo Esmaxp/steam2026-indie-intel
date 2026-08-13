@@ -37,6 +37,7 @@ from app.models.stats import (
     WishlistRankEntry,
     WishlistRankSweep,
 )
+from app.models.sweeps import SWEEP_KINDS, TERMINAL_STATUSES, SweepJob
 from app.models.sync import SyncState
 from app.models.taxonomy import Genre, Tag
 from app.models.videos import (
@@ -71,10 +72,13 @@ __all__ = [
     "RevenueEstimate",
     "RevenueRecord",
     "SteamDeckSupport",
+    "SWEEP_KINDS",
     "SteamStats",
+    "SweepJob",
     "SyncStage",
     "SyncState",
     "SyncStatus",
+    "TERMINAL_STATUSES",
     "Tag",
     "VideoCache",
     "WebsiteScan",
