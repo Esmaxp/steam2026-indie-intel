@@ -11,6 +11,9 @@ const FALLBACK = {
   muted: "#898781",
   ink2: "#52514e",
   surface: "#fcfcfb",
+  statusGood: "#0ca30c",
+  statusWarn: "#fab219",
+  statusCritical: "#d03b3b",
 };
 
 export function useChartTokens() {
@@ -28,6 +31,9 @@ export function useChartTokens() {
         muted: get("--muted", FALLBACK.muted),
         ink2: get("--ink-2", FALLBACK.ink2),
         surface: get("--surface", FALLBACK.surface),
+        statusGood: get("--status-good", FALLBACK.statusGood),
+        statusWarn: get("--status-warn", FALLBACK.statusWarn),
+        statusCritical: get("--status-critical", FALLBACK.statusCritical),
       });
     };
     read();

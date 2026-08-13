@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   Bar,
   BarChart,
@@ -16,6 +17,7 @@ import { API_BASE } from "@/lib/api";
 import { fmtInt, labelFor } from "@/lib/format";
 import { useChartTokens } from "@/hooks/use-chart-tokens";
 import { Card } from "@/components/ui/card";
+import { GenreSuccessPie } from "@/components/genre-success-pie";
 
 interface MonthPoint {
   month: number;
@@ -62,13 +64,29 @@ function tooltipStyle(tokens: ReturnType<typeof useChartTokens>) {
 }
 
 /** Horizontal single-measure breakdown: one series → one hue, no legend.
- *  The "unknown" bucket is muted gray + label (a status, not an identity). */
-function SimpleBreakdown({ data }: { data: BreakdownPoint[] }) {
+ *  The "unknown" bucket is muted gray + label (a status, not an identity).
+ *  Pass onSelect to make the bars clickable (used by Top genres). */
+function SimpleBreakdown({
+  data,
+  onSelect,
+  selected,
+}: {
+  data: BreakdownPoint[];
+  onSelect?: (key: string) => void;
+  selected?: string | null;
+}) {
   const tokens = useChartTokens();
   const rows = data.map((d) => ({
     ...d,
     label: labelFor(d.key),
-    fill: d.key === "unknown" ? tokens.muted : tokens.series1,
+    fill:
+      d.key === "unknown"
+        ? tokens.muted
+        : selected && d.key !== selected
+          ? tokens.series1
+          : selected === d.key
+            ? tokens.series2
+            : tokens.series1,
   }));
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -92,7 +110,22 @@ function SimpleBreakdown({ data }: { data: BreakdownPoint[] }) {
           contentStyle={tooltipStyle(tokens)}
           cursor={{ fill: tokens.grid, opacity: 0.3 }}
         />
-        <Bar dataKey="count" barSize={14} radius={[0, 4, 4, 0]}>
+        <Bar
+          dataKey="count"
+          barSize={14}
+          radius={[0, 4, 4, 0]}
+          // recharts hands the bar's own datum, but nests the original row
+          // under `payload` in some versions — read both.
+          onClick={
+            onSelect
+              ? (entry: { key?: string; payload?: { key?: string } }) => {
+                  const key = entry?.payload?.key ?? entry?.key;
+                  if (key) onSelect(String(key));
+                }
+              : undefined
+          }
+          cursor={onSelect ? "pointer" : undefined}
+        >
           {rows.map((row, i) => (
             <Cell key={i} fill={row.fill} />
           ))}
@@ -104,6 +137,7 @@ function SimpleBreakdown({ data }: { data: BreakdownPoint[] }) {
 
 export function AnalyticsCharts() {
   const tokens = useChartTokens();
+  const [genre, setGenre] = useState<string | null>(null);
   const { data, isLoading } = useQuery({ queryKey: ["charts"], queryFn: fetchCharts });
 
   if (isLoading || !data) {
@@ -163,9 +197,14 @@ export function AnalyticsCharts() {
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Top genres (Indie excluded — it's every game)">
-        <SimpleBreakdown data={data.top_genres} />
+      <ChartCard title="Top genres (click a bar for its success spread)">
+        <SimpleBreakdown
+          data={data.top_genres}
+          onSelect={(key) => setGenre((current) => (current === key ? null : key))}
+          selected={genre}
+        />
       </ChartCard>
+      {genre ? <GenreSuccessPie genre={genre} onClose={() => setGenre(null)} /> : null}
       <ChartCard title="Engine (Unknown = no public signal)">
         <SimpleBreakdown data={data.by_engine} />
       </ChartCard>

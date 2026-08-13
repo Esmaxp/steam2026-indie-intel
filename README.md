@@ -181,6 +181,23 @@ marked **Conflicting** with every source shown. Budgets are either Confirmed
 disclosures or explicitly labeled heuristics (team-cost and revenue-ratio
 methods, formulas and inputs stored for audit — see ARCHITECTURE.md §9).
 
+### Genre success breakdown (estimated)
+
+Steam publishes no sales figures either, so the analytics section's genre
+success breakdown — click a bar in "Top genres" — is an explicit heuristic: the
+Boxleiter method, `estimated_sales = total_reviews * multiplier`. The API
+returns the formula, the multiplier actually used and its source, and the UI
+prints them under the pie, the same way every other estimate carries its
+inputs. The constant lives in `backend/app/services/boxleiter.py` with its
+provenance and credible range (25-60; the "true" value varies by price, genre
+and age). Games with no review count are reported separately and excluded from
+the pie rather than guessed into a tier.
+
+```bash
+curl "http://localhost:8000/api/v1/dashboard/genre-success?genre=Action"
+curl "http://localhost:8000/api/v1/dashboard/genre-success?genre=RPG&multiplier=50"
+```
+
 ## Troubleshooting
 
 - **Port already in use** (5432/8000/3000): stop the conflicting process, or

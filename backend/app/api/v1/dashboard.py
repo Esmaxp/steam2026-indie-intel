@@ -1,11 +1,18 @@
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models import Dimension, Game, Genre, game_genres
-from app.schemas.charts import BreakdownPoint, ChartsOut, MonthPoint
+from app.schemas.charts import (
+    BreakdownPoint,
+    ChartsOut,
+    GenreSuccessOut,
+    MonthPoint,
+    SuccessTierPoint,
+)
 from app.schemas.game import AverageStat, DashboardSummary
+from app.services import boxleiter
 from app.services.games_query import (
     latest_revenue_sq,
     latest_stats_sq,
@@ -102,4 +109,72 @@ async def charts(db: AsyncSession = Depends(get_db)) -> ChartsOut:
         by_engine=await _breakdown(db, Game.engine),
         by_graphics_style=await _breakdown(db, Game.graphics_style),
         top_genres=top_genres,
+    )
+
+
+@router.get("/genre-success", response_model=GenreSuccessOut)
+async def genre_success(
+    genre: str = Query(..., min_length=1, description="Genre name, case-insensitive"),
+    multiplier: float | None = Query(
+        None,
+        description=(
+            "Override the sales-per-review multiplier. Clamped to "
+            f"{boxleiter.MULTIPLIER_RANGE[0]}–{boxleiter.MULTIPLIER_RANGE[1]}; "
+            f"default {boxleiter.DEFAULT_MULTIPLIER}."
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> GenreSuccessOut:
+    """Estimated success spread of one genre, via the review-count heuristic.
+
+    Games without a review count are counted separately and excluded from the
+    tiers — an unknown sales figure is not a bucket.
+    """
+    in_genre = (
+        sa.select(game_genres.c.appid)
+        .join(Genre, Genre.id == game_genres.c.genre_id)
+        .where(
+            game_genres.c.appid == Game.appid,
+            sa.func.lower(Genre.name) == genre.strip().lower(),
+        )
+        .exists()
+    )
+    games_in_genre = await _count(db, in_genre)
+    if not games_in_genre:
+        raise HTTPException(status_code=404, detail=f"No games found for genre '{genre}'")
+
+    ls = latest_stats_sq()
+    review_rows = await db.execute(
+        sa.select(ls.c.total_reviews)
+        .select_from(Game)
+        .join(ls, ls.c.appid == Game.appid)
+        .where(in_genre, ls.c.total_reviews.is_not(None), ls.c.total_reviews > 0)
+    )
+    reviews = [row[0] for row in review_rows]
+
+    used_multiplier = boxleiter.clamp_multiplier(multiplier)
+    counts: dict[str, int] = {tier.key: 0 for tier in boxleiter.SUCCESS_TIERS}
+    for total_reviews in reviews:
+        tier = boxleiter.tier_for(boxleiter.estimate_sales(total_reviews, used_multiplier))
+        counts[tier.key] += 1
+
+    return GenreSuccessOut(
+        genre=genre.strip(),
+        games_in_genre=games_in_genre,
+        games_scored=len(reviews),
+        games_without_reviews=games_in_genre - len(reviews),
+        multiplier=used_multiplier,
+        formula=boxleiter.FORMULA,
+        method=boxleiter.METHOD_NAME,
+        source=boxleiter.MULTIPLIER_SOURCE,
+        tiers=[
+            SuccessTierPoint(
+                key=tier.key,
+                label=tier.label,
+                count=counts[tier.key],
+                min_sales=tier.min_sales,
+                max_sales=tier.max_sales,
+            )
+            for tier in boxleiter.SUCCESS_TIERS
+        ],
     )
