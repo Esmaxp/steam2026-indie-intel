@@ -173,7 +173,13 @@ export interface GameDetail extends GameListItem {
   /** How the game entered the catalog — indie_tag, or a tag-less signal. */
   discovery_method: "indie_tag" | "self_published_no_tag" | "boutique_label_no_tag";
   /** Where the 2D/3D value came from. */
-  dimension_source: "tag" | "rule_based" | "vision_ai" | "similarity_ai" | "unknown";
+  dimension_source:
+    | "tag"
+    | "rule_based"
+    | "similarity" // offline TF-IDF neighbours (free)
+    | "vision_ai"
+    | "similarity_ai" // paid LLM estimate
+    | "unknown";
   supported_languages: string[];
   controller_support: string;
   steam_deck_support: string;

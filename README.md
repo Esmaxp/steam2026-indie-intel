@@ -110,6 +110,7 @@ in order; each states its expected outcome.
 | scanner | Detect social channels on game websites | – | no (profile: scrape) | `docker compose run --rm scanner` |
 | video_prefetch | Warm per-game video cache | – | no (profile: scrape) | `docker compose run --rm video_prefetch` |
 | reclassify | Replay the rule-based classifier over collected games (free, offline) | – | no (profile: scrape) | `docker compose run --rm reclassify` |
+| dimension_local | Fill unresolved 2D/3D from catalog similarity (offline TF-IDF, free) | – | no (profile: scrape) | `docker compose run --rm dimension_local` |
 | dimension_vision | Classify 2D/3D from a screenshot (needs `ANTHROPIC_API_KEY`) | – | no (profile: scrape) | `docker compose run --rm dimension_vision` |
 | dimension_similarity | Estimate 2D/3D from metadata when no tag, rule or screenshot settles it (needs `ANTHROPIC_API_KEY`) | – | no (profile: scrape) | `docker compose run --rm dimension_similarity` |
 | followers | Community-hub follower counts (daily) | – | no (profile: scrape) | `docker compose run --rm followers` |
@@ -132,11 +133,30 @@ docker compose run --rm discovery python -m scraper.discovery.run --mode search 
 ```
 
 Visual classification (dimension / camera / graphics style) runs as a ladder,
-cheapest first: Steam's own tags → rule-based inference from
-camera/graphics/description (free, part of the collector) → `dimension_vision`
-(reads one screenshot) → `dimension_similarity` (estimates from metadata alone).
-The last two cost real API money, never run automatically, and only ever touch
-rows still `unknown`; `games.dimension_source` records which step decided.
+cheapest first:
+
+1. **`tag`** — Steam's own 2D/2.5D/3D tag.
+2. **`rule_based`** — inference from camera, graphics style and description
+   (free, part of the collector).
+3. **`similarity`** — `dimension_local`: an offline TF-IDF + cosine-similarity
+   vote over the games already settled by steps 1-2. Free, local, no API key
+   and no network call. Measured on a 2,000-game holdout: 68% coverage at 89%
+   accuracy with the defaults (`--validate N` re-measures it any time).
+4. **`vision_ai` / `similarity_ai`** — `dimension_vision` reads a screenshot,
+   `dimension_similarity` estimates from metadata. Both cost real API money and
+   need `ANTHROPIC_API_KEY`.
+
+Every step only ever fills rows still `unknown`, never overwrites a settled
+value, and records itself in `games.dimension_source`. Step 3 additionally skips
+games that carry a dimension tag of their own: if such a game is still unknown,
+its tags contradicted each other, and text similarity has no business
+overruling that.
+
+```bash
+docker compose run --rm dimension_local python -m workers.classify_dimension_local --dry-run
+docker compose run --rm dimension_local python -m workers.classify_dimension_local --validate 2000
+docker compose run --rm dimension_local            # apply
+```
 
 Because `store_data` never re-runs for a game once it is DONE, improvements to
 the classifier are invisible to already-collected games. The `reclassify`
