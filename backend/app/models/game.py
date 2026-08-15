@@ -78,6 +78,12 @@ class Game(Base, TimestampMixin):
     effort_score: Mapped[int | None] = mapped_column(Integer)
     effort_class: Mapped[str] = mapped_column(Text, default="unknown", index=True)
     effort_signals: Mapped[dict | None] = mapped_column(JSONB)
+    # The production-only view of the same signals — no marketing, no price,
+    # no release status. Separate because the combined score above is 60%
+    # commercial decisions, which buries a game that was built and never
+    # marketed. See effort_score.craft_score.
+    craft_score: Mapped[int | None] = mapped_column(Integer)
+    craft_class: Mapped[str] = mapped_column(Text, default="unknown", index=True)
     # Axis 2 — audience found (0-100), from players only: traction_score.
     # traction_status says why a score is absent; "no reviews yet" three weeks
     # after release is age, not failure.

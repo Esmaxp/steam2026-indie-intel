@@ -84,6 +84,10 @@ class GameListItem(BaseModel):
     effort_score: int | None = None
     effort_class: str = "unknown"
     effort_signals: dict | None = None
+    # The production-only view of the same signals. Separate field because
+    # the combined score above is 60% marketing and pricing decisions.
+    craft_score: int | None = None
+    craft_class: str = "unknown"
     # Axis 2: what players did. traction_status says why a score is absent.
     traction_score: int | None = None
     traction_class: str = "unknown"

@@ -57,6 +57,10 @@ export interface GameListItem {
   effort_class: "serious" | "mixed" | "hobby" | "unknown";
   /** Which signals earned the score, and what each was worth. */
   effort_signals: { score: number; signals: Record<string, number> } | null;
+  /** The production-only view of those same signals: no marketing, no price,
+   *  no release status. What the "Craft level" filter reads. */
+  craft_score: number | null;
+  craft_class: "serious" | "mixed" | "hobby" | "unknown";
   /** Axis 2: what players did. traction_status says why a score is absent. */
   traction_score: number | null;
   traction_class: "strong" | "modest" | "weak" | "unknown";

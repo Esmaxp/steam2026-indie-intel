@@ -81,8 +81,10 @@ export function ClassificationSummaryCard() {
           real production effort that review counts alone would bury. Games too
           new to judge (under 90 days) or with no store data are counted as
           &quot;not enough data yet&quot; rather than as failures. Released and
-          upcoming use the same flag as the Released / Upcoming toggle, so a
-          row matches what the Classification filter returns for it.
+          upcoming use the same flag as the Released / Upcoming toggle. This
+          card crosses effort with traction; the &quot;Craft level&quot; filter
+          above the table asks a narrower question — production evidence only —
+          so the two do not partition the catalogue the same way.
         </p>
       }
     >

@@ -4,11 +4,14 @@ import pytest
 
 from app.services.effort_score import (
     CLASS_HOBBY,
+    CLASS_MIXED,
+    CRAFT_MAX_POSITIVE,
     CLASS_SERIOUS,
     CLASS_UNKNOWN,
     MAX_POSITIVE,
     SIGNAL_DOC,
     EffortInput,
+    craft_score,
     score,
 )
 
@@ -136,3 +139,82 @@ def test_traction_is_not_an_input():
     """
     for field in ("total_reviews", "followers", "wishlist_rank", "peak_ccu"):
         assert field not in EffortInput.__dataclass_fields__
+
+
+# --- craft: production evidence only ---------------------------------------
+
+def test_craft_ignores_marketing_and_price():
+    """The whole point: a game that was built and never marketed must not
+    read as a hobby project. Under the combined score this lands near hobby,
+    because 60% of its weight is website/demo/Next Fest/socials/price."""
+    built_but_unmarketed = game(
+        screenshot_count=14,
+        language_count=6,
+        achievements_count=20,
+        description_length=300,
+        has_website=False,
+        demo_available=False,
+        next_fest=False,
+        has_social_channels=False,
+        list_price_cents=399,
+    )
+    assert craft_score(built_but_unmarketed).craft_class == CLASS_SERIOUS
+    assert score(built_but_unmarketed).effort_class != CLASS_SERIOUS
+
+
+def test_craft_is_blind_to_price_and_release_status():
+    """None of the craft signals touch price, so free-to-play and unreleased
+    games are not structurally capped the way the combined score caps them."""
+    signals = dict(screenshot_count=14, language_count=6, achievements_count=20,
+                   description_length=300)
+    paid = craft_score(game(list_price_cents=2999, **signals))
+    free = craft_score(game(is_free=True, list_price_cents=0, **signals))
+    cheap = craft_score(game(list_price_cents=99, **signals))
+    assert paid.score == free.score == cheap.score
+
+
+def test_publisher_behaviour_never_touches_craft():
+    """mass_published and developer_volume describe the scale of an operation,
+    not the care in one game. They stay on the combined score."""
+    plain = craft_score(game(screenshot_count=14, language_count=6))
+    prolific = craft_score(
+        game(screenshot_count=14, language_count=6, mass_published=True,
+             developer_releases=40)
+    )
+    assert plain.score == prolific.score
+    assert "mass_published" not in prolific.signals
+    assert "developer_volume" not in prolific.signals
+
+
+def test_an_asset_flip_reads_as_noise_whatever_it_costs():
+    flip = dict(screenshot_count=3, language_count=1, description_length=40,
+                achievements_count=None)
+    for price in (99, 1999, None):
+        assert craft_score(game(list_price_cents=price, **flip)).craft_class == CLASS_HOBBY
+
+
+def test_craft_thresholds_sit_where_the_signal_counts_change():
+    """55 = three signals, 32 = two. One signal alone is the catalogue's
+    largest pile and is not evidence of much."""
+    one = craft_score(game(description_length=300))            # 10 raw
+    two = craft_score(game(description_length=300, achievements_count=5))   # 20
+    three = craft_score(game(description_length=300, achievements_count=5,
+                             screenshot_count=14))             # 30
+    assert one.craft_class == CLASS_HOBBY
+    assert two.craft_class == CLASS_MIXED
+    assert three.craft_class == CLASS_SERIOUS
+
+
+def test_craft_is_unknown_when_the_page_was_never_read():
+    result = craft_score(game(store_data_seen=False))
+    assert result.craft_class == CLASS_UNKNOWN
+    assert result.signals == {}
+
+
+def test_craft_max_is_the_sum_of_its_positive_signals():
+    assert CRAFT_MAX_POSITIVE == 44
+    best = craft_score(
+        game(screenshot_count=14, language_count=6, achievements_count=20,
+             description_length=300)
+    )
+    assert best.score == 100

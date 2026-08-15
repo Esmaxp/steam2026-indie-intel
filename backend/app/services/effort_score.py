@@ -167,6 +167,50 @@ SIGNAL_DOC: dict[str, tuple[int, str, str, str, str]] = {
 }
 
 
+# --- craft: the same signals, minus everything that is not production -------
+#
+# score() above answers "did somebody run this like a product?", and 66 of its
+# 110 positive points are marketing and pricing decisions. That is the right
+# question for some purposes and the wrong one for the question this catalogue
+# keeps asking: did somebody actually BUILD this? A developer who spent two
+# years on a game and then never made a website, never cut a demo, never
+# entered Next Fest and priced it at $4 scores as hobby on the combined score
+# — the exact misreading the effort axis exists to prevent.
+#
+# So craft_score() reads only the signals that evidence production, and it has
+# a second property worth stating: NONE of them touch price or release status.
+# The combined score structurally penalises free-to-play (exempt from pricing
+# signals but still measured against a scale that includes them — 0.4% of free
+# games reach serious, against 12.7% of paid) and unreleased games. Craft is
+# free of that by construction, not by correction: 19.5% of released free
+# games clear the serious bar here.
+#
+# mass_published and developer_volume are deliberately absent. Both describe
+# the scale of an operation rather than the care in one game, and a prolific
+# developer's good game is still a good game. Mass-publishing is already
+# surfaced catalogue-wide by the "Hide flagged" control; developer_volume
+# stays on the combined effort score only.
+CRAFT_POSITIVE = ("screenshots", "localised", "localised_deep", "achievements", "description")
+CRAFT_NEGATIVE = ("no_trailer", "thin_description")
+CRAFT_SIGNALS = CRAFT_POSITIVE + CRAFT_NEGATIVE
+
+CRAFT_MAX_POSITIVE = sum(SIGNAL_DOC[name][0] for name in CRAFT_POSITIVE)  # 44
+
+# Thresholds read off this catalogue's own craft distribution, which is lumpy
+# rather than smooth: the signals are few and chunky, so games pile up at the
+# exact values that correspond to how many of them fired. The gaps between
+# those piles are where the cuts belong.
+#
+#   raw 0      4,300 games — nothing at all
+#   raw 10     5,117 games — exactly ONE signal fired
+#   ...
+CRAFT_SERIOUS_AT = 55   # raw >= 24: three or more signals, e.g. 10 screenshots
+                        # + 3 languages + a real description (28). 31.1%.
+CRAFT_MIXED_AT = 32     # raw >= 14: two signals. Sits in the gap just above
+                        # the one-signal pile, which is the largest in the
+                        # catalogue and is not evidence of much.
+
+
 @dataclass(frozen=True)
 class EffortInput:
     """Everything the score reads. No traction metric appears here, by design."""
@@ -262,3 +306,34 @@ def score(data: EffortInput) -> EffortResult:
         observed=len(signals),
         signals=signals,
     )
+
+
+@dataclass(frozen=True)
+class CraftResult:
+    score: int                 # 0-100
+    craft_class: str
+    raw: int
+    signals: dict[str, int] = field(default_factory=dict)
+
+
+def craft_score(data: EffortInput) -> CraftResult:
+    """Production evidence only — no marketing, no price, no release status.
+
+    Derived from score()'s own breakdown rather than recomputed, so the two
+    can never disagree about what a signal is worth: there is one weight
+    table, and craft is a view of it.
+    """
+    full = score(data)
+    if full.effort_class == CLASS_UNKNOWN:
+        return CraftResult(score=0, craft_class=CLASS_UNKNOWN, raw=0)
+
+    signals = {name: pts for name, pts in full.signals.items() if name in CRAFT_SIGNALS}
+    raw = sum(signals.values())
+    scaled = max(0, min(100, round(100 * raw / CRAFT_MAX_POSITIVE)))
+    if scaled >= CRAFT_SERIOUS_AT:
+        craft_class = CLASS_SERIOUS
+    elif scaled >= CRAFT_MIXED_AT:
+        craft_class = CLASS_MIXED
+    else:
+        craft_class = CLASS_HOBBY
+    return CraftResult(score=scaled, craft_class=craft_class, raw=raw, signals=signals)

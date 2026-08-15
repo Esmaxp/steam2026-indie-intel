@@ -197,48 +197,33 @@ export function FiltersBar() {
         <ParamToggle paramKey="next_fest" label="Next Fest" />
         <ReleaseStatusControl />
         <ParamToggle paramKey="early_access" label="Early Access" />
-        {/* The two axes crossed. "Serious but overlooked" leads the list on
-            purpose: it is the group traction alone would hide, and the reason
-            effort is scored separately at all. */}
+        {/* One question: did somebody actually build this? Reads only
+            production evidence — screenshots, localisation, achievements, a
+            real description — and nothing about marketing, price or release
+            status. That last part matters: the older combined effort score
+            put 60% of its weight on commercial decisions, so a game that was
+            made and then never marketed scored the same as a bulk upload,
+            and free games could barely clear the bar at all.
+
+            It replaces two controls that used to sit here (an effort ×
+            traction crossing and a "Developer effort" tier), both built on
+            that confounded score. The traction axis is a separate question
+            and is not what this filter is for. */}
         <ParamSelect
-          paramKey="classification"
-          label="Classification"
-          options={[
-            "HIGH_EFFORT_LOW_TRACTION",
-            "HIGH_EFFORT_HIGH_TRACTION",
-            "LOW_EFFORT_HIGH_TRACTION",
-            "LOW_EFFORT_LOW_TRACTION",
-            "INSUFFICIENT_DATA",
-          ]}
-          optionLabels={(v) =>
-            v === "HIGH_EFFORT_LOW_TRACTION"
-              ? "Serious but overlooked"
-              : v === "HIGH_EFFORT_HIGH_TRACTION"
-                ? "Serious & found an audience"
-                : v === "LOW_EFFORT_HIGH_TRACTION"
-                  ? "Low effort, got lucky"
-                  : v === "LOW_EFFORT_LOW_TRACTION"
-                    ? "Low effort, no traction"
-                    : "Not enough data yet"
-          }
-        />
-        <HideFlaggedToggle />
-        {/* Production effort, kept separate from traction on purpose: a
-            serious game that nobody found is the interesting case. */}
-        <ParamSelect
-          paramKey="effort_class"
-          label="Developer effort"
+          paramKey="craft_class"
+          label="Craft level"
           options={["serious", "mixed", "hobby", "unknown"]}
           optionLabels={(v) =>
             v === "serious"
-              ? "Serious effort"
+              ? "Real effort"
               : v === "mixed"
-                ? "Mixed"
+                ? "Some effort"
                 : v === "hobby"
-                  ? "Hobby project"
+                  ? "Low effort / noise"
                   : "Not yet assessed"
           }
         />
+        <HideFlaggedToggle />
         <HideLimitedToggle />
         {/* Now a real partition of the catalogue: `confirmed` = a developer
             disclosed a figure, `unknown` = everything else. */}

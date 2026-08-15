@@ -201,6 +201,10 @@ class GameFilters:
     # How much production effort the store page evidences — independent of
     # whether the game sold. See app.services.effort_score.
     effort_class: str | None = None
+    # The production-only view of the same signals: no marketing, no price,
+    # no release status. This is the noise filter; effort_class above still
+    # answers the broader "run like a product?" question.
+    craft_class: str | None = None
     classification: str | None = None
     # False hides games whose Steam profile features are still restricted.
     include_limited: bool = True
@@ -326,6 +330,8 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         conds.append(Game.low_quality_signal.is_(False))
     if f.effort_class is not None:
         conds.append(Game.effort_class == f.effort_class)
+    if f.craft_class is not None:
+        conds.append(Game.craft_class == f.craft_class)
     if f.classification is not None:
         conds.append(Game.classification == f.classification)
     if not f.include_limited:

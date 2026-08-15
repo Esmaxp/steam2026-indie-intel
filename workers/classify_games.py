@@ -162,29 +162,32 @@ async def run(limit: int, dry_run: bool, examples: int) -> None:
 
         labels: dict[str, int] = defaultdict(int)
         effort_classes: dict[str, int] = defaultdict(int)
+        craft_classes: dict[str, int] = defaultdict(int)
         traction_classes: dict[str, int] = defaultdict(int)
         shown = 0
 
         for index, row in enumerate(rows, start=1):
             languages = row.supported_languages or []
-            effort = effort_score.score(
-                effort_score.EffortInput(
-                    has_trailer=row.trailers > 0,
-                    screenshot_count=row.screenshots,
-                    list_price_cents=row.list_price_cents,
-                    is_free=bool(row.is_free),
-                    language_count=len(languages) if isinstance(languages, list) else 0,
-                    has_website=bool((row.website or "").strip()),
-                    demo_available=bool(row.demo_available),
-                    achievements_count=row.achievements_count,
-                    description_length=len(row.short_description or ""),
-                    next_fest=row.next_fest > 0,
-                    has_social_channels=row.channels > 0,
-                    mass_published=bool(row.low_quality_signal),
-                    developer_releases=dev_counts.get(row.appid, 0),
-                    store_data_seen=row.limited_profile is not None,
-                )
+            signals = effort_score.EffortInput(
+                has_trailer=row.trailers > 0,
+                screenshot_count=row.screenshots,
+                list_price_cents=row.list_price_cents,
+                is_free=bool(row.is_free),
+                language_count=len(languages) if isinstance(languages, list) else 0,
+                has_website=bool((row.website or "").strip()),
+                demo_available=bool(row.demo_available),
+                achievements_count=row.achievements_count,
+                description_length=len(row.short_description or ""),
+                next_fest=row.next_fest > 0,
+                has_social_channels=row.channels > 0,
+                mass_published=bool(row.low_quality_signal),
+                developer_releases=dev_counts.get(row.appid, 0),
+                store_data_seen=row.limited_profile is not None,
             )
+            effort = effort_score.score(signals)
+            # The production-only view of the same inputs, written alongside
+            # rather than instead of: nothing that reads effort_class changes.
+            craft = effort_score.craft_score(signals)
             traction = traction_score.score(
                 traction_score.TractionInput(
                     reviews_pct=row.reviews_pct if row.total_reviews else None,
@@ -199,6 +202,7 @@ async def run(limit: int, dry_run: bool, examples: int) -> None:
 
             labels[label.label] += 1
             effort_classes[effort.effort_class] += 1
+            craft_classes[craft.craft_class] += 1
             traction_classes[traction.traction_class] += 1
 
             if shown < examples and label.label == classification.HIGH_EFFORT_LOW_TRACTION:
@@ -217,6 +221,8 @@ async def run(limit: int, dry_run: bool, examples: int) -> None:
                         effort_score=effort.score,
                         effort_class=effort.effort_class,
                         effort_signals={"score": effort.score, "signals": effort.signals},
+                        craft_score=craft.score,
+                        craft_class=craft.craft_class,
                         traction_score=traction.score,
                         traction_class=traction.traction_class,
                         traction_status=traction.status,
@@ -234,6 +240,7 @@ async def run(limit: int, dry_run: bool, examples: int) -> None:
             await db.commit()
 
         logger.info("Effort: %s", dict(sorted(effort_classes.items())))
+        logger.info("Craft: %s", dict(sorted(craft_classes.items())))
         logger.info("Traction: %s", dict(sorted(traction_classes.items())))
         logger.info("Classification: %s", dict(sorted(labels.items())))
         if dry_run:

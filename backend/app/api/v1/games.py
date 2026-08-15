@@ -103,6 +103,13 @@ async def list_games(
         description="production effort the store page evidences — independent "
         "of whether the game sold",
     ),
+    craft_class: str | None = Query(
+        None,
+        pattern="^(serious|mixed|hobby|unknown)$",
+        description="production evidence only — screenshots, localisation, "
+        "achievements, description. Blind to marketing, price and release "
+        "status, so it is fair to free and unreleased games",
+    ),
     classification: str | None = Query(
         None,
         pattern="^(HIGH_EFFORT_HIGH_TRACTION|HIGH_EFFORT_LOW_TRACTION|"
@@ -138,7 +145,8 @@ async def list_games(
         max_wishlist_rank=max_wishlist_rank,
         wishlist_status=wishlist_status, revenue_status=revenue_status,
         indie_confidence=indie_confidence, include_flagged=include_flagged,
-        effort_class=effort_class, classification=classification,
+        effort_class=effort_class, craft_class=craft_class,
+        classification=classification,
         include_limited=include_limited, sort=sort,
     )
     query = build_games_query(filters)

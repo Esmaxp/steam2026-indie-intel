@@ -76,6 +76,8 @@ def row_to_list_item(row) -> GameListItem:
         effort_score=game.effort_score,
         effort_class=game.effort_class,
         effort_signals=game.effort_signals,
+        craft_score=game.craft_score,
+        craft_class=game.craft_class,
         traction_score=game.traction_score,
         traction_class=game.traction_class,
         traction_status=game.traction_status,

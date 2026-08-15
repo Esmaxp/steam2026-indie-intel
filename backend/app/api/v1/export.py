@@ -62,6 +62,7 @@ async def export_games(
     # The export mirrors the table, so every filter the table offers has to
     # reach it — an export that silently ignores a filter ships the wrong file.
     effort_class: str | None = None,
+    craft_class: str | None = None,
     classification: str | None = None,
     include_limited: bool = True,
     sort: str = "-release_date",
@@ -78,7 +79,8 @@ async def export_games(
         max_wishlist_rank=max_wishlist_rank,
         wishlist_status=wishlist_status, revenue_status=revenue_status,
         indie_confidence=indie_confidence, include_flagged=include_flagged,
-        effort_class=effort_class, classification=classification,
+        effort_class=effort_class, craft_class=craft_class,
+        classification=classification,
         include_limited=include_limited, sort=sort,
     )
     query = build_games_query(filters)
