@@ -378,16 +378,42 @@ Disclosures are harvested from official Steam news
 announcement URL and its own date. Because that is the highest trust tier, the
 harvester defaults to a dry run and requires `--write`.
 
-### Revenue: no first-party source, honestly unknown
+### Revenue: estimated first-party, as a band, with its arithmetic attached
 
 The third-party estimate vendors (Gamalytic, SteamSpy, VG Insights) were
 retired and their rows deleted in migration 0013 — of 8,380 rows, 0 carried
-revenue, 0 carried sales, and 99.8% were the 0–20,000 owners bucket. Revenue
-now has no source at all and reports `unknown` for every game.
+revenue, 0 carried sales, and 99.8% were the 0–20,000 owners bucket.
+
+What replaced them (migration 0017) is a first-party estimator:
+`app/services/revenue_estimate.py` (pure, no DB) turns measured signals into
+copies-sold bands, `workers/estimate_revenue.py` writes one
+`revenue_estimates` row per signal, and the merge below rebuilds the
+`revenue_records` summary from those rows.
+
+- **reviews** — tiered multiplier (20/27/36/49/48× by review count), the
+  level-setting signal. Gated at 10 reviews.
+- **ccu** — all-time peak concurrents × 25/50/100. These factors were
+  *fitted against the review estimator* on the 1,826 games where both fire,
+  so agreement between the two is not independent confirmation. Listed in
+  `revenue_merge.CROSS_CHECK_SOURCES`: it widens the band and shows up in
+  `estimate_spread`, but never moves the summary value — concurrency runs
+  high for multiplayer and low for short games at identical sales.
+- **followers** — hub followers × 1.2/2.0/3.0, via wishlists. The only
+  signal that works before launch.
+
+Copies become money in one place (`to_revenue`): list price × 0.65 average
+selling price, then × 0.70 Valve × 0.95 refunds × 0.90 regional/VAT. Free
+games get copies but never revenue — their money is in items we do not
+observe.
+
+`workers/calibrate_revenue.py` compares the result against developer-
+disclosed copies (harvested by `sales_disclosures.py`, promoted by a human)
+and proposes a single global scalar — never a per-tier refit, which ten
+data points cannot support.
 
 `revenue_estimates` / `revenue_records` and `revenue_merge.merge_estimates()`
-remain, because `disclosed_numbers_source.py` still routes human-verified
-developer figures through them:
+also still carry human-verified developer figures from
+`disclosed_numbers_source.py`:
 1. A Confirmed disclosure wins outright.
 2. One estimate → passed through as `estimated`.
 3. 2+ estimates → **median**; `estimate_spread = (max−min)/median`;

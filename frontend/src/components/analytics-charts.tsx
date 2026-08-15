@@ -17,7 +17,9 @@ import { API_BASE } from "@/lib/api";
 import { fmtInt, labelFor } from "@/lib/format";
 import { useChartTokens } from "@/hooks/use-chart-tokens";
 import { Card } from "@/components/ui/card";
-import { GenreSuccessPie } from "@/components/genre-success-pie";
+import { ChartCard } from "@/components/chart-card";
+import { ClassificationSummaryCard } from "@/components/classification-summary";
+import { GenreRevenuePie } from "@/components/genre-revenue-pie";
 
 interface MonthPoint {
   month: number;
@@ -43,15 +45,6 @@ async function fetchCharts(): Promise<ChartsOut> {
   const res = await fetch(`${API_BASE}/api/v1/dashboard/charts`);
   if (!res.ok) throw new Error("charts fetch failed");
   return res.json();
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <Card className="p-4">
-      <h3 className="mb-2 text-sm font-medium text-ink2">{title}</h3>
-      <div className="h-56">{children}</div>
-    </Card>
-  );
 }
 
 function tooltipStyle(tokens: ReturnType<typeof useChartTokens>) {
@@ -197,14 +190,17 @@ export function AnalyticsCharts() {
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Top genres (click a bar to rank its games)">
+      <ChartCard title="Top genres (click a bar for its revenue breakdown)">
         <SimpleBreakdown
           data={data.top_genres}
           onSelect={(key) => setGenre((current) => (current === key ? null : key))}
           selected={genre}
         />
       </ChartCard>
-      {genre ? <GenreSuccessPie genre={genre} onClose={() => setGenre(null)} /> : null}
+      {/* One card for this concern, two modes: the all-genres pie until a
+          genre bar is clicked, then that genre across every tier. */}
+      <GenreRevenuePie genre={genre} onClose={() => setGenre(null)} />
+      <ClassificationSummaryCard />
       <ChartCard title="Engine (Unknown = no public signal)">
         <SimpleBreakdown data={data.by_engine} />
       </ChartCard>

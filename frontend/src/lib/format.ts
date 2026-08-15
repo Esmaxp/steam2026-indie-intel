@@ -29,6 +29,18 @@ export function fmtPriceCents(
   }).format(cents / 100);
 }
 
+/** Money at a glance: "$1.2M", "$76.4K". For estimates, where the last three
+ *  digits are noise and printing them would imply a precision nobody has. */
+export function fmtMoneyShort(value: number | null | undefined): string {
+  if (value === null || value === undefined) return DASH;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 export function fmtPct(value: number | null | undefined): string {
   if (value === null || value === undefined) return DASH;
   return `${value.toFixed(0)}%`;
