@@ -39,7 +39,7 @@ from app.models import (
 )
 from scraper.collectors.budget_cost_tables import MONTHLY_COST_PER_PERSON_USD
 from scraper.collectors.budget_estimator import recompute_budgets
-from scraper.collectors.revenue_merge import merge_estimates
+from scraper.collectors.revenue_merge import merge_estimates, record_values
 
 
 async def apply(args: argparse.Namespace) -> None:
@@ -76,18 +76,7 @@ async def apply(args: argparse.Namespace) -> None:
             merged = merge_estimates(rows)
             if merged:
                 db.add(
-                    RevenueRecord(
-                        appid=args.appid,
-                        status=merged.status,
-                        gross_revenue_usd=merged.gross_revenue_usd,
-                        estimated_sales=merged.estimated_sales,
-                        estimated_owners_min=merged.owners_min,
-                        estimated_owners_max=merged.owners_max,
-                        estimate_spread=merged.estimate_spread,
-                        source_name=merged.source_name,
-                        source_url=merged.source_url,
-                        notes=merged.notes,
-                    )
+                    RevenueRecord(appid=args.appid, **record_values(merged))
                 )
             print(f"Confirmed revenue recorded for {args.appid}")
 

@@ -33,6 +33,7 @@ from app.models.game import Game
 from app.models.media import MediaAsset
 from app.models.stats import (
     FollowerSnapshot,
+    PriceSnapshot,
     SteamStats,
     WishlistRankEntry,
     WishlistRankSweep,
@@ -68,6 +69,7 @@ __all__ = [
     "MarketingInfo",
     "MediaAsset",
     "MediaType",
+    "PriceSnapshot",
     "Publisher",
     "RevenueEstimate",
     "RevenueRecord",
