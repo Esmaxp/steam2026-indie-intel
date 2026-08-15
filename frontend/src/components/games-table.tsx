@@ -47,6 +47,63 @@ interface ExpandMeta {
 
 const GENRES_SHOWN = 4;
 
+/** Four-quadrant label, short enough to sit beside a game's name. Colour
+ *  follows status-badge.tsx — green for the good outcome, the accent for the
+ *  one worth acting on, muted for the rest — and never carries the meaning
+ *  alone, since the words are always there too. */
+const CLASSIFICATION_STYLE: Record<string, { label: string; tone: string }> = {
+  HIGH_EFFORT_HIGH_TRACTION: {
+    label: "Serious · found",
+    tone: "border-status-good/40 text-good-text",
+  },
+  // This catalogue's reason for existing, so it gets the accent rather than a
+  // neutral tone: real production effort that review counts alone would bury.
+  HIGH_EFFORT_LOW_TRACTION: {
+    label: "Serious · overlooked",
+    tone: "border-accent/50 bg-accent/10 text-accent",
+  },
+  LOW_EFFORT_HIGH_TRACTION: { label: "Lucky", tone: "border-hairline text-ink2" },
+  LOW_EFFORT_LOW_TRACTION: { label: "Low effort", tone: "border-hairline text-muted" },
+};
+
+const EFFORT_WORD: Record<string, string> = {
+  serious: "Serious",
+  mixed: "Mixed",
+  hobby: "Hobby",
+};
+
+/** Why a game sits where the filters put it.
+ *
+ *  These signals used to be filter-only: you could hide flagged games but
+ *  never see which ones they were, or why. The tooltip carries both axes and
+ *  the effort breakdown behind them. INSUFFICIENT_DATA renders nothing — a
+ *  game released three weeks ago has not earned a verdict. */
+function ClassificationBadge({ game }: { game: GameListItem }) {
+  const style = CLASSIFICATION_STYLE[game.classification];
+  if (!style) return null;
+  const signals = game.effort_signals?.signals ?? {};
+  const detail = Object.entries(signals)
+    .map(([name, weight]) => `${name} ${weight > 0 ? "+" : ""}${weight}`)
+    .join(", ");
+  const title = [
+    `Effort ${game.effort_score ?? "?"}/100 (${EFFORT_WORD[game.effort_class] ?? game.effort_class})`,
+    `traction ${game.traction_score ?? "?"}/100 (${game.traction_class})`,
+    `${game.classification_confidence} confidence`,
+  ].join(" · ");
+  return (
+    <Badge
+      className={`shrink-0 px-1.5 py-0 text-[10px] ${style.tone}`}
+      title={
+        title +
+        (detail ? ` — effort signals: ${detail}` : "") +
+        (game.limited_profile ? " — Steam profile features still restricted." : "")
+      }
+    >
+      {style.label}
+    </Badge>
+  );
+}
+
 /** Columns hidden on a first visit — the widest, least-scanned ones.
  *  Everything stays toggleable via the Columns menu. */
 const DEFAULT_COLUMN_VISIBILITY: VisibilityState = {
@@ -103,22 +160,25 @@ const columns = [
     cell: (info) => {
       const game = info.row.original;
       return (
-        <Link
-          href={`/games/${game.appid}`}
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-2 font-medium text-ink hover:text-accent"
-        >
-          {game.capsule_image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={game.capsule_image_url}
-              alt=""
-              className="h-8 w-auto rounded-sm border border-hairline"
-              loading="lazy"
-            />
-          ) : null}
-          <span className="max-w-56 truncate">{game.name}</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/games/${game.appid}`}
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-2 font-medium text-ink hover:text-accent"
+          >
+            {game.capsule_image_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={game.capsule_image_url}
+                alt=""
+                className="h-8 w-auto rounded-sm border border-hairline"
+                loading="lazy"
+              />
+            ) : null}
+            <span className="max-w-56 truncate">{game.name}</span>
+          </Link>
+          <ClassificationBadge game={game} />
+        </div>
       );
     },
   }),

@@ -123,6 +123,22 @@ function HideFlaggedToggle() {
   );
 }
 
+/** include_limited defaults to true server-side; the toggle sets it false. */
+function HideLimitedToggle() {
+  const { searchParams, setParams } = useFilterParams();
+  const active = searchParams.get("include_limited") === "false";
+  return (
+    <Button
+      onClick={() => setParams({ include_limited: active ? null : "false" })}
+      className={active ? "border-accent bg-accent/10 text-accent" : ""}
+      aria-pressed={active}
+      title="Hide games whose Steam profile features are still restricted — Valve's own signal that a game has not cleared its sales and engagement bar"
+    >
+      Hide Steam-limited
+    </Button>
+  );
+}
+
 function ParamToggle({ paramKey, label }: { paramKey: string; label: string }) {
   const { searchParams, setParams } = useFilterParams();
   const active = searchParams.get(paramKey) === "true";
@@ -181,15 +197,49 @@ export function FiltersBar() {
         <ParamToggle paramKey="next_fest" label="Next Fest" />
         <ReleaseStatusControl />
         <ParamToggle paramKey="early_access" label="Early Access" />
+        {/* The two axes crossed. "Serious but overlooked" leads the list on
+            purpose: it is the group traction alone would hide, and the reason
+            effort is scored separately at all. */}
         <ParamSelect
-          paramKey="indie_confidence"
-          label="Indie confidence"
-          options={["high", "medium", "low"]}
+          paramKey="classification"
+          label="Classification"
+          options={[
+            "HIGH_EFFORT_LOW_TRACTION",
+            "HIGH_EFFORT_HIGH_TRACTION",
+            "LOW_EFFORT_HIGH_TRACTION",
+            "LOW_EFFORT_LOW_TRACTION",
+            "INSUFFICIENT_DATA",
+          ]}
           optionLabels={(v) =>
-            v === "high" ? "High confidence" : v === "medium" ? "Medium" : "Low (flagged)"
+            v === "HIGH_EFFORT_LOW_TRACTION"
+              ? "Serious but overlooked"
+              : v === "HIGH_EFFORT_HIGH_TRACTION"
+                ? "Serious & found an audience"
+                : v === "LOW_EFFORT_HIGH_TRACTION"
+                  ? "Low effort, got lucky"
+                  : v === "LOW_EFFORT_LOW_TRACTION"
+                    ? "Low effort, no traction"
+                    : "Not enough data yet"
           }
         />
         <HideFlaggedToggle />
+        {/* Production effort, kept separate from traction on purpose: a
+            serious game that nobody found is the interesting case. */}
+        <ParamSelect
+          paramKey="effort_class"
+          label="Developer effort"
+          options={["serious", "mixed", "hobby", "unknown"]}
+          optionLabels={(v) =>
+            v === "serious"
+              ? "Serious effort"
+              : v === "mixed"
+                ? "Mixed"
+                : v === "hobby"
+                  ? "Hobby project"
+                  : "Not yet assessed"
+          }
+        />
+        <HideLimitedToggle />
         {/* Now a real partition of the catalogue: `confirmed` = a developer
             disclosed a figure, `unknown` = everything else. */}
         <ParamSelect

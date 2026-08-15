@@ -198,6 +198,12 @@ class GameFilters:
     revenue_status: DataStatus | None = None
     indie_confidence: IndieConfidence | None = None
     include_flagged: bool = True  # False hides low_quality_signal games
+    # How much production effort the store page evidences — independent of
+    # whether the game sold. See app.services.effort_score.
+    effort_class: str | None = None
+    classification: str | None = None
+    # False hides games whose Steam profile features are still restricted.
+    include_limited: bool = True
     sort: str = "-release_date"
 
 
@@ -318,6 +324,14 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         conds.append(Game.indie_confidence == f.indie_confidence)
     if not f.include_flagged:
         conds.append(Game.low_quality_signal.is_(False))
+    if f.effort_class is not None:
+        conds.append(Game.effort_class == f.effort_class)
+    if f.classification is not None:
+        conds.append(Game.classification == f.classification)
+    if not f.include_limited:
+        # NULL means the store page has not been read yet, so it cannot be
+        # claimed as unrestricted — only a measured False survives this filter.
+        conds.append(Game.limited_profile.is_(False))
     if f.min_reviews is not None:
         conds.append(ls.c.total_reviews >= f.min_reviews)
     if f.min_positive_pct is not None:

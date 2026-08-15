@@ -62,7 +62,37 @@ class Game(Base, TimestampMixin):
     currency: Mapped[str | None] = mapped_column(Text)
     launch_price_cents: Mapped[int | None] = mapped_column(Integer)
     current_price_cents: Mapped[int | None] = mapped_column(Integer)
+    # Steam's list price, unaffected by sales — the only price that says how a
+    # game is positioned. current_price_cents moves with every discount.
+    list_price_cents: Mapped[int | None] = mapped_column(Integer)
     launch_discount_pct: Mapped[int | None] = mapped_column(Integer)
+    achievements_count: Mapped[int | None] = mapped_column(Integer)
+
+    # Printed on the store page, absent from appdetails. NULL = not looked at
+    # yet (pre-dates the backfill), which is not the same as False.
+    limited_profile: Mapped[bool | None] = mapped_column(Boolean)
+    ai_disclosure: Mapped[bool | None] = mapped_column(Boolean)
+    # Axis 1 — production effort the store page evidences (0-100), deliberately
+    # blind to sales: app.services.effort_score. effort_signals keeps the
+    # per-signal breakdown so a class is always reviewable.
+    effort_score: Mapped[int | None] = mapped_column(Integer)
+    effort_class: Mapped[str] = mapped_column(Text, default="unknown", index=True)
+    effort_signals: Mapped[dict | None] = mapped_column(JSONB)
+    # Axis 2 — audience found (0-100), from players only: traction_score.
+    # traction_status says why a score is absent; "no reviews yet" three weeks
+    # after release is age, not failure.
+    traction_score: Mapped[int | None] = mapped_column(Integer)
+    traction_class: Mapped[str] = mapped_column(Text, default="unknown")
+    traction_status: Mapped[str] = mapped_column(
+        Text, default="insufficient_data_no_signals"
+    )
+    traction_signals: Mapped[dict | None] = mapped_column(JSONB)
+    # The two axes crossed: HIGH_EFFORT_LOW_TRACTION is the row this catalogue
+    # exists to surface — a serious game nobody found.
+    classification: Mapped[str] = mapped_column(
+        Text, default="INSUFFICIENT_DATA", index=True
+    )
+    classification_confidence: Mapped[str] = mapped_column(Text, default="low")
 
     controller_support: Mapped[ControllerSupport] = mapped_column(
         pg_enum(ControllerSupport, "controller_support"), default=ControllerSupport.UNKNOWN

@@ -35,12 +35,32 @@ SEARCH_MIN_INTERVAL = 1.0      # seconds between Steam search requests
 APPDETAILS_MIN_INTERVAL = 1.5  # seconds between appdetails requests
 
 
+def release_flags(
+    release: ParsedRelease, coming_soon: bool | None, today: datetime.date
+) -> tuple[bool, bool]:
+    """(is_released, coming_soon) — mutually exclusive, always.
+
+    Steam's own `coming_soon` wins when we have it: a game whose listed date
+    has passed but which Valve still flags as upcoming has not launched (dates
+    slip, and the flag clears at the real launch, not at midnight). Deriving
+    the two flags independently let both be true at once, and because a later
+    re-discovery upserts over the collector's value, those rows survived —
+    which is how the "upcoming" tile and the upcoming filter came to disagree.
+
+    Pure so the invariant can be tested without a database.
+    """
+    if coming_soon is not None:
+        return (not coming_soon and release.date is not None), coming_soon
+    is_released = release.date is not None and release.date <= today
+    return is_released, not is_released
+
+
 async def upsert_game(session, appid: int, name: str, release: ParsedRelease,
                       coming_soon: bool | None = None,
                       discovery_method: str = "indie_tag") -> None:
-    is_released = release.date is not None and release.date <= datetime.date.today()
-    if coming_soon is None:
-        coming_soon = not is_released
+    is_released, coming_soon = release_flags(
+        release, coming_soon, datetime.date.today()
+    )
     stmt = pg_insert(Game).values(
         appid=appid,
         name=name,
