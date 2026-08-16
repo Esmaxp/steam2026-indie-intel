@@ -129,9 +129,12 @@ def banded(source, low, mid, high, net_mid=None, copies=None):
 
 def test_the_merged_band_is_the_widest_any_source_claimed():
     """Two signals agreeing does not narrow an uncertainty nobody measured."""
+    # Generic names on purpose: this pins merge mechanics, and the set of
+    # level-setting sources is a policy that changes (followers moved into
+    # CROSS_CHECK_SOURCES once the sweep let the two be compared).
     merged = merge_estimates([
-        banded("reviews", 800, 1000, 1500),
-        banded("followers", 600, 1100, 1300),
+        banded("a", 800, 1000, 1500),
+        banded("b", 600, 1100, 1300),
     ])
     assert (merged.gross_min_usd, merged.gross_max_usd) == (600.0, 1500.0)
     assert merged.gross_revenue_usd == 1050.0  # median of the mids, unchanged
@@ -146,8 +149,8 @@ def test_a_source_without_a_band_still_widens_the_span():
 
 def test_net_and_copies_merge_the_same_way():
     merged = merge_estimates([
-        banded("reviews", 800, 1000, 1200, net_mid=400, copies=100),
-        banded("followers", 900, 1200, 1400, net_mid=600, copies=200),
+        banded("a", 800, 1000, 1200, net_mid=400, copies=100),
+        banded("b", 900, 1200, 1400, net_mid=600, copies=200),
     ])
     assert merged.net_revenue_usd == 500.0
     assert (merged.net_min_usd, merged.net_max_usd) == (200.0, 1200.0)

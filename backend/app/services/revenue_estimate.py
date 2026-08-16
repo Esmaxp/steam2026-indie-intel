@@ -106,8 +106,25 @@ CCU_ANCHOR_SAMPLE = 1826
 
 # --- copies: signal 3, community-hub followers -----------------------------
 MIN_FOLLOWERS = 20
-# followers -> wishlists (8/10/12) -> sales (0.15/0.20/0.25), multiplied out.
-FOLLOWER_FACTORS = (1.2, 2.0, 3.0)
+# The chain is followers -> wishlists (8/10/12) -> sales (0.15/0.20/0.25),
+# which multiplies out to 1.2/2.0/3.0. Both links are rules of thumb nobody
+# published a study on, and once the follower sweep covered the catalogue the
+# error showed: on the 5,834 games where reviews and followers both fire, the
+# review estimator implies 2.75x more copies (quartiles 1.39 and 5.11).
+#
+# So the factors below are the raw chain re-centred on the review estimator —
+# 2.0 x 2.75 for the middle, and the quartiles for the band. Before this, the
+# systematic gap alone flagged 3,587 games as "conflicting", which read as
+# per-game disagreement when it was one stale constant.
+#
+# The cost is the same one CCU_FACTORS pays and it has to be said plainly:
+# followers are no longer independent evidence of the LEVEL. When the two
+# agree, that is arithmetic, not confirmation. They stay level-setting anyway
+# because for roughly eight thousand games — the ones under the 10-review
+# gate — followers are the only signal there is, and a borrowed centring
+# beats refusing to answer.
+FOLLOWER_FACTORS = (2.8, 5.5, 10.2)
+FOLLOWER_ANCHOR_SAMPLE = 5834
 
 # --- copies -> money -------------------------------------------------------
 # Average selling price as a fraction of list. Most units move during sales;
@@ -162,13 +179,17 @@ ESTIMATOR_DOC: dict[str, tuple[str, str, str, str]] = {
         "games sit far above the median and short narrative games far below",
     ),
     SOURCE_FOLLOWERS: (
-        "community-hub followers x 1.2/2.0/3.0",
-        "followers-to-wishlists of roughly 1:10, and first-year wishlist "
-        "conversion of 15-25%",
+        "community-hub followers x 2.8/5.5/10.2",
+        "followers-to-wishlists of roughly 1:10 and first-year wishlist "
+        f"conversion of 15-25%, then re-centred on the review estimator over "
+        f"the {FOLLOWER_ANCHOR_SAMPLE} games where both fire (median ratio "
+        "2.75, quartiles 1.39 and 5.11)",
         "medium",
-        "a game that ran a giveaway or was bundled collects followers who "
-        "never bought it; conversely a game selling on a storefront push can "
-        "have almost no hub following",
+        "the centring is borrowed, so agreement with the review estimator is "
+        "arithmetic rather than confirmation — the same caveat CCU carries. "
+        "Beyond that: a game that ran a giveaway or was bundled collects "
+        "followers who never bought it, and a game selling on a storefront "
+        "push can have almost no hub following",
     ),
     "asp": (
         f"average selling price as {ASP_FACTOR:.2f} of list price",

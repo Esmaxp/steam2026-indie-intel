@@ -33,7 +33,19 @@ CONFLICT_SPREAD_THRESHOLD = 0.5
 #
 # When a cross-check source is all a game has, it sets the level anyway —
 # a weak estimate beats refusing to answer for a game we do have data on.
-CROSS_CHECK_SOURCES = frozenset({"ccu"})
+# That fallback is what makes this safe for followers: they are the only
+# signal for roughly eight thousand games under the 10-review gate, and those
+# games keep their estimate. What changes is that where reviews exist,
+# reviews decide.
+#
+# Followers joined this set once the sweep covered the catalogue and the
+# numbers could be compared. Their chain (followers -> wishlists -> sales) is
+# two rules of thumb multiplied together, and re-centring it on the review
+# estimator still left the two disagreeing by 1.39x-5.11x across the
+# quartiles. A source whose centring is borrowed and whose per-game spread is
+# nearly 4x cannot be allowed to pull the summary around; it can widen the
+# band and show up in the spread, which is what it is good for.
+CROSS_CHECK_SOURCES = frozenset({"ccu", "followers"})
 
 
 @dataclass(frozen=True)

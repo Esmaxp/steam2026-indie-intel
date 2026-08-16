@@ -14,6 +14,7 @@ from app.services.revenue_estimate import (
     BAND_LOW,
     CCU_FACTORS,
     EARLY_ACCESS_FACTOR,
+    FOLLOWER_FACTORS,
     ESTIMATOR_DOC,
     MIN_FOLLOWERS,
     MIN_PEAK_CCU,
@@ -215,3 +216,16 @@ def test_estimate_all_returns_only_signals_that_cleared_their_gate():
     assert estimate_all(game()) == []
     assert len(estimate_all(game(total_reviews=100))) == 1
     assert len(estimate_all(game(total_reviews=100, peak_ccu=50, followers=500))) == 3
+
+
+def test_followers_are_centred_on_the_review_estimator():
+    """Like CCU, the follower chain's centring is borrowed rather than
+    measured. This guards the half-done change: move the review curve without
+    refitting FOLLOWER_FACTORS and thousands of games start reporting a
+    conflict that is really a stale constant — which is exactly what a full
+    follower sweep exposed the first time."""
+    reviews = from_reviews(game(total_reviews=1000))
+    followers = from_followers(
+        game(followers=round(reviews.copies_mid / FOLLOWER_FACTORS[1]))
+    )
+    assert abs(followers.copies_mid - reviews.copies_mid) / reviews.copies_mid < 0.05
