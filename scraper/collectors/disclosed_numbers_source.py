@@ -59,6 +59,13 @@ async def apply(args: argparse.Namespace) -> None:
                     revenue_usd=args.revenue,
                     estimated_sales=args.sales,
                     source_url=args.source_url,
+                    # Most disclosures are round lower bounds ("over 1 million
+                    # copies"), and recording one as an exact figure would
+                    # overstate what was said AND bias any calibration
+                    # downward — the estimator would look high against a floor
+                    # it actually cleared. app.services.revenue_calibration
+                    # reads this key and keeps bounds out of the ratio.
+                    inputs={"comparator": args.comparator},
                 )
             )
             await db.flush()
@@ -131,6 +138,11 @@ def main() -> None:
     parser.add_argument("--appid", type=int, required=True)
     parser.add_argument("--revenue", type=float, help="gross revenue USD")
     parser.add_argument("--sales", type=int, help="units sold")
+    parser.add_argument(
+        "--comparator", choices=("=", ">="), default="=",
+        help="'>=' when the source states a lower bound ('over 1 million'), "
+        "which is how most milestone posts are phrased",
+    )
     parser.add_argument("--wishlist", type=int, help="wishlist count")
     parser.add_argument("--budget", type=float, help="development budget USD")
     parser.add_argument("--team-size", type=int, dest="team_size")

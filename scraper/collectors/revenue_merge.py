@@ -161,6 +161,22 @@ def merge_estimates(estimates: list[RevenueEstimate]) -> MergedRevenue | None:
             notes="confirmed disclosure overrides estimates",
         )
 
+    # A ">=" disclosure is a FLOOR, not a measurement. Averaging one into the
+    # median treats "we passed 3 million in week one" as "we sold exactly 3
+    # million", which drags the summary DOWN — the opposite of what the
+    # statement supports, and worse the older the post is. Slay the Spire 2
+    # fell from 11.7M to 7.3M the moment a five-month-old first-week milestone
+    # was recorded. So bounds leave the median entirely and are applied after
+    # it: they can raise the answer, never lower it.
+    bounds = [
+        float(e.estimated_sales)
+        for e in estimates
+        if (e.inputs or {}).get("comparator") == ">=" and e.estimated_sales is not None
+    ]
+    estimates = [e for e in estimates if (e.inputs or {}).get("comparator") != ">="]
+    if not estimates:
+        return None
+
     names = sorted({e.source_name for e in estimates})
     # Level-setting sources decide the summary value; everything with a
     # revenue figure decides the reported spread. They differ only when a
@@ -217,6 +233,17 @@ def merge_estimates(estimates: list[RevenueEstimate]) -> MergedRevenue | None:
             notes="owners/sales only — no revenue estimate from any source",
         )
 
+    median_sales = _median_int(sales)
+    floor = max(bounds) if bounds else None
+    sales_note = ""
+    if floor is not None and (median_sales is None or floor > median_sales):
+        # The developer said the game had passed this; our estimate had it
+        # lower, so the disclosure wins on its own terms.
+        median_sales = int(floor)
+        sales_note = f"; raised to a disclosed floor of {int(floor):,}"
+    if floor is not None:
+        sales_min = max(sales_min or 0, int(floor)) if sales_min is not None else int(floor)
+
     median_revenue = statistics.median(revenues)
     spread = None
     status = DataStatus.ESTIMATED
@@ -243,12 +270,12 @@ def merge_estimates(estimates: list[RevenueEstimate]) -> MergedRevenue | None:
         net_revenue_usd=_median_float(nets),
         net_min_usd=net_span[0],
         net_max_usd=net_span[1],
-        estimated_sales=_median_int(sales),
+        estimated_sales=median_sales,
         sales_min=sales_min,
         sales_max=sales_max,
         owners_min=owners_min,
         owners_max=owners_max,
-        sources_used=len(estimates),
+        sources_used=len(estimates) + len(bounds),
         source_name=label,
         source_url=first_url,
         estimate_spread=spread,
@@ -260,5 +287,6 @@ def merge_estimates(estimates: list[RevenueEstimate]) -> MergedRevenue | None:
                 else ""
             )
             + (f"; spread={spread:.0%}" if spread is not None else "")
+            + sales_note
         ),
     )
