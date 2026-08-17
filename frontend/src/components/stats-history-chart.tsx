@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { fetchGameFollowers, fetchGameRankHistory, fetchGameStats } from "@/lib/api";
 import { fmtInt } from "@/lib/format";
-import { useChartTokens } from "@/hooks/use-chart-tokens";
+import { tooltipStyles, useChartTokens } from "@/hooks/use-chart-tokens";
 import { Card } from "@/components/ui/card";
 
 /** Two measures of different scale → two charts, never a dual axis. */
@@ -56,12 +56,7 @@ function SeriesChart({
             />
             <Tooltip
               formatter={(value) => [formatValue(Number(value)), title]}
-              contentStyle={{
-                background: tokens.surface,
-                border: `1px solid ${tokens.grid}`,
-                borderRadius: 6,
-                fontSize: 12,
-              }}
+              {...tooltipStyles(tokens)}
             />
             <Line
               type="monotone"

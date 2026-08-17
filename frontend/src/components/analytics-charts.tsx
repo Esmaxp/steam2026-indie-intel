@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import { API_BASE } from "@/lib/api";
 import { fmtInt, labelFor } from "@/lib/format";
-import { useChartTokens } from "@/hooks/use-chart-tokens";
+import { tooltipStyles, useChartTokens } from "@/hooks/use-chart-tokens";
 import { Card } from "@/components/ui/card";
 import { ChartCard } from "@/components/chart-card";
 import { ClassificationSummaryCard } from "@/components/classification-summary";
@@ -45,15 +45,6 @@ async function fetchCharts(): Promise<ChartsOut> {
   const res = await fetch(`${API_BASE}/api/v1/dashboard/charts`);
   if (!res.ok) throw new Error("charts fetch failed");
   return res.json();
-}
-
-function tooltipStyle(tokens: ReturnType<typeof useChartTokens>) {
-  return {
-    background: tokens.surface,
-    border: `1px solid ${tokens.grid}`,
-    borderRadius: 6,
-    fontSize: 12,
-  } as const;
 }
 
 /** Horizontal single-measure breakdown: one series → one hue, no legend.
@@ -100,7 +91,7 @@ function SimpleBreakdown({
         />
         <Tooltip
           formatter={(value) => [fmtInt(Number(value)), "Games"]}
-          contentStyle={tooltipStyle(tokens)}
+          {...tooltipStyles(tokens)}
           cursor={{ fill: tokens.grid, opacity: 0.3 }}
         />
         <Bar
@@ -169,7 +160,7 @@ export function AnalyticsCharts() {
                 fmtInt(Number(value)),
                 name === "released" ? "Released" : "Upcoming",
               ]}
-              contentStyle={tooltipStyle(tokens)}
+              {...tooltipStyles(tokens)}
               cursor={{ fill: tokens.grid, opacity: 0.3 }}
             />
             <Legend

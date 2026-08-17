@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { API_BASE } from "@/lib/api";
 import { fmtInt, fmtMoneyShort } from "@/lib/format";
-import { useChartTokens } from "@/hooks/use-chart-tokens";
+import { tooltipStyles, useChartTokens } from "@/hooks/use-chart-tokens";
 import { ChartCard } from "@/components/chart-card";
 
 interface GenreSlice {
@@ -192,16 +192,16 @@ function AllGenresExplanation({ data }: { data: Distribution }) {
 function GenreTierView({
   genre,
   palette,
-  surface,
-  grid,
   onClose,
 }: {
   genre: string;
   palette: string[];
-  surface: string;
-  grid: string;
   onClose: () => void;
 }) {
+  // Reads the tokens rather than taking two of them as props: the tooltip
+  // needs a foreground colour as well, and threading a third through would
+  // just move the problem.
+  const tokens = useChartTokens();
   const { data, isLoading, isError } = useQuery({
     queryKey: ["genre-tier-breakdown", genre],
     queryFn: () => fetchGenreBreakdown(genre),
@@ -292,7 +292,7 @@ function GenreTierView({
             innerRadius={44}
             outerRadius={92}
             paddingAngle={2}
-            stroke={surface}
+            stroke={tokens.surface}
             isAnimationActive={false}
           >
             {slices.map((band) => (
@@ -314,13 +314,10 @@ function GenreTierView({
                 band.label,
               ];
             }}
-            contentStyle={{
-              background: surface,
-              border: `1px solid ${grid}`,
-              borderRadius: 6,
-              fontSize: 12,
-              maxWidth: 320,
-            }}
+            {...tooltipStyles(tokens)}
+            // Wider than the shared default: this tooltip carries a sentence,
+            // not a number.
+            contentStyle={{ ...tooltipStyles(tokens).contentStyle, maxWidth: 320 }}
           />
           {/* Same legend component as the all-genres pie, so the two views
               read as one card rather than two designs. It replaces the tier
@@ -380,8 +377,6 @@ export function GenreRevenuePie({
       <GenreTierView
         genre={genre}
         palette={palette}
-        surface={tokens.surface}
-        grid={tokens.grid}
         onClose={onClose ?? (() => undefined)}
       />
     );
@@ -453,11 +448,9 @@ export function GenreRevenuePie({
                 slice.genre,
               ];
             }}
+            {...tooltipStyles(tokens)}
             contentStyle={{
-              background: tokens.surface,
-              border: `1px solid ${tokens.grid}`,
-              borderRadius: 6,
-              fontSize: 12,
+              ...tooltipStyles(tokens).contentStyle,
               maxWidth: 320,
             }}
           />

@@ -9,6 +9,7 @@ const FALLBACK = {
   series2: "#eb6834",
   grid: "#e1e0d9",
   muted: "#898781",
+  ink: "#0b0b0b",
   ink2: "#52514e",
   surface: "#fcfcfb",
   statusGood: "#0ca30c",
@@ -29,6 +30,7 @@ export function useChartTokens() {
         series2: get("--series-2", FALLBACK.series2),
         grid: get("--grid", FALLBACK.grid),
         muted: get("--muted", FALLBACK.muted),
+        ink: get("--ink", FALLBACK.ink),
         ink2: get("--ink-2", FALLBACK.ink2),
         surface: get("--surface", FALLBACK.surface),
         statusGood: get("--status-good", FALLBACK.statusGood),
@@ -43,4 +45,31 @@ export function useChartTokens() {
   }, []);
 
   return tokens;
+}
+
+
+/** Styling for a Recharts <Tooltip>, spread as `{...tooltipStyles(tokens)}`.
+ *
+ *  Recharts defaults its tooltip text to a dark colour and colours each item
+ *  by its series. Setting only `background` therefore produces near-black text
+ *  on the near-black `--surface` in dark mode — the panel is legible, the words
+ *  inside it are not. All three surfaces need the foreground stated: the
+ *  wrapper, the label, and the items, whose inline per-series colour is
+ *  otherwise applied before any inherited value.
+ *
+ *  Items lose their series tint as a result. The chart and its legend already
+ *  carry that mapping, and a tooltip whose text cannot be read carries nothing.
+ */
+export function tooltipStyles(tokens: ReturnType<typeof useChartTokens>) {
+  return {
+    contentStyle: {
+      background: tokens.surface,
+      border: `1px solid ${tokens.grid}`,
+      borderRadius: 6,
+      fontSize: 12,
+      color: tokens.ink,
+    },
+    labelStyle: { color: tokens.ink },
+    itemStyle: { color: tokens.ink },
+  } as const;
 }
