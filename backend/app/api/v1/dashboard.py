@@ -86,7 +86,15 @@ async def summary(db: AsyncSession = Depends(get_db)) -> DashboardSummary:
     return DashboardSummary(
         total_games=await _count(db),
         released_games=await _count(db, Game.is_released.is_(True)),
-        coming_soon_games=await _count(db, Game.coming_soon.is_(True)),
+        # A released game is not upcoming, whatever its coming_soon flag says.
+        # The two are written by different passes and 24 rows currently carry
+        # both — all of them dated 2026-08-10, released while the store flag
+        # went stale. Counting the flag alone put those games in both cards, so
+        # Released + Upcoming came to 23,102 against a catalogue of 23,078, and
+        # disagreed with the games list, whose Upcoming filter is is_released.
+        coming_soon_games=await _count(
+            db, Game.coming_soon.is_(True), Game.is_released.is_(False)
+        ),
         two_d_games=await _count(db, Game.dimension == Dimension.TWO_D),
         three_d_games=await _count(db, Game.dimension == Dimension.THREE_D),
         games_with_demo=await _count(db, Game.demo_available.is_(True)),
