@@ -538,8 +538,19 @@ def _method_out() -> RevenueMethodOut:
     )
 
 
-async def _genre_tier_breakdown(db: AsyncSession, genre: str) -> GenreTierBreakdownOut:
-    """One genre split into mutually exclusive revenue bands.
+ALL_GAMES_LABEL = "All games"
+
+
+async def _genre_tier_breakdown(
+    db: AsyncSession, genre: str | None
+) -> GenreTierBreakdownOut:
+    """One genre split into mutually exclusive revenue bands — or, with
+    `genre=None`, the whole estimable catalogue split the same way.
+
+    The all-games shape is the baseline a genre is read against: "46% of RPGs
+    clear $10K" means little without knowing the catalogue figure it beats.
+    It is the same query minus the genre join, so it shares this function
+    rather than growing a near-duplicate.
 
     Exclusive rather than cumulative because these are pie slices: cumulative
     pass-rates are nested ($100K+ games are also $10K+ games) and would sum
@@ -560,31 +571,38 @@ async def _genre_tier_breakdown(db: AsyncSession, genre: str) -> GenreTierBreakd
         else_=len(REVENUE_BANDS) - 1,
     )
 
-    rows = await db.execute(
-        sa.select(
-            band_index.label("band"),
-            sa.func.count(),
-            sa.func.coalesce(sa.func.sum(net), 0),
+    stmt = sa.select(
+        band_index.label("band"),
+        sa.func.count(),
+        sa.func.coalesce(sa.func.sum(net), 0),
+    ).select_from(revenue)
+    if genre is not None:
+        stmt = (
+            stmt.join(game_genres, game_genres.c.appid == revenue.c.appid)
+            .join(Genre, Genre.id == game_genres.c.genre_id)
+            .where(Genre.name == genre)
         )
-        .select_from(revenue)
-        .join(game_genres, game_genres.c.appid == revenue.c.appid)
-        .join(Genre, Genre.id == game_genres.c.genre_id)
-        .where(Genre.name == genre)
-        .group_by(band_index)
-    )
+    rows = await db.execute(stmt.group_by(band_index))
     counts: dict[int, tuple[int, float]] = {
         int(index): (int(count), float(total)) for index, count, total in rows
     }
     total_games = sum(count for count, _ in counts.values())
 
+    # How many games carry this genre at all, estimable or not — the
+    # denominator behind "3,266 estimable of 10,352 Casual games". For the
+    # whole catalogue that is simply the catalogue.
     genre_total = (
-        await db.execute(
-            sa.select(sa.func.count())
-            .select_from(game_genres)
-            .join(Genre, Genre.id == game_genres.c.genre_id)
-            .where(Genre.name == genre)
-        )
-    ).scalar_one()
+        await _count(db)
+        if genre is None
+        else (
+            await db.execute(
+                sa.select(sa.func.count())
+                .select_from(game_genres)
+                .join(Genre, Genre.id == game_genres.c.genre_id)
+                .where(Genre.name == genre)
+            )
+        ).scalar_one()
+    )
 
     bands: list[GenreRevenueBand] = []
     for index, band in enumerate(REVENUE_BANDS):
@@ -605,7 +623,7 @@ async def _genre_tier_breakdown(db: AsyncSession, genre: str) -> GenreTierBreakd
         )
 
     return GenreTierBreakdownOut(
-        genre=genre,
+        genre=genre if genre is not None else ALL_GAMES_LABEL,
         total_games=total_games,
         genre_total=genre_total,
         catalogue_total=await _count(db),
@@ -629,6 +647,14 @@ async def genre_revenue_distribution(
             "the genre mix at one tier; min_revenue is ignored"
         ),
     ),
+    bands: bool = Query(
+        False,
+        description=(
+            "return the whole estimable catalogue split into revenue bands — "
+            "the baseline a single genre's bands are read against. Ignored "
+            "when `genre` is given, and ignores min_revenue like `genre` does."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> GenreRevenueDistributionOut | GenreTierBreakdownOut:
     """Which genres the games above a revenue threshold belong to.
@@ -644,6 +670,8 @@ async def genre_revenue_distribution(
     """
     if genre and genre.strip():
         return await _genre_tier_breakdown(db, genre.strip())
+    if bands:
+        return await _genre_tier_breakdown(db, None)
 
     revenue = _estimable_revenue_sq()
     above = _above_sq(revenue, min_revenue)

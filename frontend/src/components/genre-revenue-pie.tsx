@@ -86,12 +86,45 @@ async function fetchDistribution(minRevenue: number): Promise<Distribution> {
   return res.json();
 }
 
-async function fetchGenreBreakdown(genre: string): Promise<GenreBreakdown> {
+/** `null` asks for the whole estimable catalogue rather than one genre — the
+ *  baseline a genre's bands are read against. */
+async function fetchGenreBreakdown(genre: string | null): Promise<GenreBreakdown> {
+  const query = genre ? `genre=${encodeURIComponent(genre)}` : "bands=true";
   const res = await fetch(
-    `${API_BASE}/api/v1/dashboard/genre-revenue-distribution?genre=${encodeURIComponent(genre)}`,
+    `${API_BASE}/api/v1/dashboard/genre-revenue-distribution?${query}`,
   );
-  if (!res.ok) throw new Error("genre tier breakdown fetch failed");
+  if (!res.ok) throw new Error("revenue band breakdown fetch failed");
   return res.json();
+}
+
+/** The three views this card can show. A genre drill-down used to be a dead
+ *  end with only a Close button, so returning to either top-level view meant
+ *  leaving the card first; the picker keeps all three one click apart. */
+type View = "bands" | "mix" | "genre";
+
+function ViewSelect({
+  view,
+  genre,
+  onChange,
+}: {
+  view: View;
+  genre: string | null;
+  onChange: (next: View) => void;
+}) {
+  return (
+    <select
+      value={view}
+      onChange={(e) => onChange(e.target.value as View)}
+      aria-label="Revenue view"
+      className="max-w-full cursor-pointer rounded border border-hairline bg-surface px-1.5 py-0.5 text-sm font-medium text-ink2 hover:text-ink"
+    >
+      <option value="bands">All games — revenue bands</option>
+      <option value="mix">Genre mix by estimated revenue</option>
+      {/* Only offered while a genre is open: it is the view you are in, and
+          an option that selects nothing would be worse than no option. */}
+      {genre ? <option value="genre">{genre} — revenue bands</option> : null}
+    </select>
+  );
 }
 
 /** Same walk as the genre-success pie, so the two read as one family. */
@@ -206,26 +239,33 @@ function AllGenresExplanation({ data }: { data: Distribution }) {
  *  opens. Exclusive rather than cumulative because these are pie slices;
  *  the cumulative share rides along in the tooltip, since that is the number
  *  two genres can actually be compared on. */
+/** Revenue bands as a pie — for one genre, or for the whole estimable
+ *  catalogue when `genre` is null. One component for both, mirroring the
+ *  single endpoint that serves them. */
 function GenreTierView({
   genre,
   palette,
   onClose,
+  selector,
 }: {
-  genre: string;
+  genre: string | null;
   palette: string[];
   onClose: () => void;
+  selector: React.ReactNode;
 }) {
   // Reads the tokens rather than taking two of them as props: the tooltip
   // needs a foreground colour as well, and threading a third through would
   // just move the problem.
   const tokens = useChartTokens();
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["genre-tier-breakdown", genre],
+    queryKey: ["genre-tier-breakdown", genre ?? "__all__"],
     queryFn: () => fetchGenreBreakdown(genre),
   });
 
-  const title = `${genre} — estimated revenue bands`;
-  const closeButton = (
+  const title = selector;
+  // Nothing to close out of on the all-games view — the picker is the way
+  // back, and a Close that returned somewhere arbitrary would be a guess.
+  const closeButton = genre ? (
     <button
       onClick={onClose}
       className="shrink-0 text-xs text-muted hover:text-ink2"
@@ -233,14 +273,14 @@ function GenreTierView({
     >
       Close
     </button>
-  );
+  ) : null;
 
   if (isLoading || !data) {
     return (
       <ChartCard title={title} action={closeButton}>
         {isError ? (
           <p className="pt-8 text-center text-sm text-muted">
-            Could not load the breakdown for {genre}.
+            Could not load the breakdown for {genre ?? "all games"}.
           </p>
         ) : (
           <div className="h-full animate-pulse rounded bg-grid/40" />
@@ -255,7 +295,7 @@ function GenreTierView({
     <div className="flex shrink-0 items-center gap-3 whitespace-nowrap text-xs text-muted">
       <span>
         {fmtInt(data.total_games)} estimable of {fmtInt(data.genre_total)}{" "}
-        {genre} games
+        {genre ?? "catalogue"} games
       </span>
       {closeButton}
     </div>
@@ -265,7 +305,7 @@ function GenreTierView({
     return (
       <ChartCard title={title} action={counter}>
         <p className="pt-8 text-center text-sm text-muted">
-          None of the {fmtInt(data.genre_total)} {genre} games can be estimated
+          None of the {fmtInt(data.genre_total)} {genre ?? "catalogue"} games can be estimated
           yet — they have fewer than {data.method.min_reviews} reviews, no
           price, or both.
         </p>
@@ -280,11 +320,11 @@ function GenreTierView({
       title={title}
       action={counter}
       footer={
-        <Explanation heading={genre} method={data.method}>
+        <Explanation heading={data.genre} method={data.method}>
           <p>
             Slices are <span className="text-ink2">exclusive bands</span>, not
             thresholds: each game sits in exactly one, so they sum to 100% of
-            the {fmtInt(data.total_games)} {genre} games that can be estimated
+            the {fmtInt(data.total_games)} {genre ?? "catalogue"} games that can be estimated
             — not all {fmtInt(data.genre_total)} of them. Using the larger
             number would report a coverage rate dressed up as a success rate.
           </p>
@@ -356,17 +396,37 @@ export function GenreRevenuePie({
 }) {
   const tokens = useChartTokens();
   const [tier, setTier] = useState(TIERS[0]);
+  // Which top-level view to show once no genre is open. Held here rather than
+  // in the parent because the parent owns only the genre, which is what the
+  // Top-genres bars set.
+  const [topLevel, setTopLevel] = useState<"bands" | "mix">("mix");
   const { data, isLoading, isError } = useQuery({
     queryKey: ["genre-revenue-distribution", tier.min],
     queryFn: () => fetchDistribution(tier.min),
     // Keeps the previous pie on screen while the next tier loads, so
     // clicking through the buttons does not flash an empty card.
     placeholderData: (previous) => previous,
-    enabled: !genre,
+    enabled: !genre && topLevel === "mix",
   });
 
   const palette = sliceColors(tokens);
-  const title = "Genre mix by estimated revenue";
+  const view: View = genre ? "genre" : topLevel;
+
+  const selector = (
+    <ViewSelect
+      view={view}
+      genre={genre}
+      onChange={(next) => {
+        // Leaving a genre means clearing it in the parent as well, or the
+        // drill-down would render straight over whichever view was picked.
+        if (next !== "genre") {
+          setTopLevel(next);
+          if (genre) onClose?.();
+        }
+      }}
+    />
+  );
+  const title = selector;
 
   const buttons = (
     <div className="flex flex-wrap gap-1">
@@ -389,12 +449,13 @@ export function GenreRevenuePie({
 
   // One card, two modes: clicking a genre bar swaps this card in place
   // rather than opening a second one beside it.
-  if (genre) {
+  if (genre || topLevel === "bands") {
     return (
       <GenreTierView
         genre={genre}
         palette={palette}
         onClose={onClose ?? (() => undefined)}
+        selector={selector}
       />
     );
   }
