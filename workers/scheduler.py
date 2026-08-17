@@ -30,7 +30,7 @@ import sqlalchemy as sa
 from app.db.session import async_session_factory
 from app.models import SweepJob
 
-from scraper.common.job_control import create_job, finish, report
+from scraper.common.job_control import create_job, finish, make_controls, report
 
 logger = logging.getLogger("scheduler")
 
@@ -96,6 +96,23 @@ async def _run(kind: str) -> None:
             from scraper.collectors.wishlist_rank import run_rank_sweep
 
             summary = await run_rank_sweep(dry_run=False)
+        elif kind == "disclosures":
+            # The catalogue walk finishes; what a repeat pass picks up is new
+            # announcements since the last one. Weekly is the sensible cadence
+            # — a full pass is ~9.6h, and developers do not post milestones
+            # daily. --write is implied: a scheduled dry run would produce a
+            # CSV nobody reads.
+            from workers.harvest_disclosures import run as run_disclosures
+
+            on_progress, should_stop = make_controls(job_id, kind)
+            summary = await run_disclosures(
+                limit=0,
+                start_appid=0,
+                only_appid=None,
+                write=True,
+                on_progress=on_progress,
+                should_stop=should_stop,
+            )
         else:
             raise ValueError(f"scheduler cannot run kind '{kind}'")
     except Exception as exc:  # one bad run must not end the loop

@@ -196,3 +196,15 @@ def test_followers_are_not_on_the_default_clock():
     it daily would queue a second pass before the first finished, so that
     series is built by a long-running loop instead."""
     assert "followers" not in scheduler.DEFAULT_SCHEDULE
+
+
+def test_the_scheduler_can_run_every_kind_it_accepts():
+    """parse_schedule takes any name, and the README advertises
+    "rank:24,disclosures:168". A kind the runner cannot execute would register
+    a job row and fail it on every cycle — a broken promise that only shows up
+    as a red card days later."""
+    import inspect
+
+    source = inspect.getsource(scheduler._run)
+    for kind in ("rank", "disclosures"):
+        assert f'kind == "{kind}"' in source, kind

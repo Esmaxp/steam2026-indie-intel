@@ -196,6 +196,8 @@ other.
 ```bash
 SWEEP_SCHEDULE="rank:24"                 # the default — daily chart sweep
 SWEEP_SCHEDULE="rank:24,disclosures:168" # add a weekly disclosure re-scan
+                                         # (the catalogue walk finishes; a repeat
+                                         #  pass picks up new announcements)
 SWEEP_SCHEDULE=""                        # off
 ```
 
