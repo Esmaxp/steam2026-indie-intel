@@ -563,7 +563,20 @@ async def _genre_tier_breakdown(
     """
     revenue = _estimable_revenue_sq()
     net = revenue.c.net_revenue_usd
+
+    # RELEASED games are the population, joined to their estimate rather than
+    # selected from it. An unreleased game has sold nothing, so it belongs in
+    # no revenue band; a released one without an estimate still exists and
+    # still earned something, and dropping it was what made the picture wrong.
     band_index = sa.case(
+        # Free-to-play: excluded from the bands entirely, counted separately.
+        # Their revenue is in items this project does not observe, so "under
+        # $10K" would be an assertion about them rather than a missing value.
+        (Game.is_free.is_(True), -1),
+        # No estimate, paid: the review floor put it here. Fewer than ten
+        # public reviews is a few hundred copies at the outside, so the bottom
+        # band is right even though the figure is not computed.
+        (net.is_(None), 0),
         *[
             (net < REVENUE_BANDS[i].max_revenue, i)
             for i in range(len(REVENUE_BANDS) - 1)
@@ -571,26 +584,38 @@ async def _genre_tier_breakdown(
         else_=len(REVENUE_BANDS) - 1,
     )
 
-    stmt = sa.select(
-        band_index.label("band"),
-        sa.func.count(),
-        sa.func.coalesce(sa.func.sum(net), 0),
-    ).select_from(revenue)
+    stmt = (
+        sa.select(
+            band_index.label("band"),
+            sa.func.count(),
+            sa.func.coalesce(sa.func.sum(net), 0),
+            sa.func.count(net).label("estimated"),
+        )
+        .select_from(Game)
+        .outerjoin(revenue, revenue.c.appid == Game.appid)
+        .where(Game.is_released.is_(True))
+    )
     if genre is not None:
         stmt = (
-            stmt.join(game_genres, game_genres.c.appid == revenue.c.appid)
+            stmt.join(game_genres, game_genres.c.appid == Game.appid)
             .join(Genre, Genre.id == game_genres.c.genre_id)
             .where(Genre.name == genre)
         )
     rows = await db.execute(stmt.group_by(band_index))
-    counts: dict[int, tuple[int, float]] = {
-        int(index): (int(count), float(total)) for index, count, total in rows
+    counts: dict[int, tuple[int, float, int]] = {
+        int(index): (int(count), float(total), int(estimated))
+        for index, count, total, estimated in rows
     }
-    total_games = sum(count for count, _ in counts.values())
 
-    # How many games carry this genre at all, estimable or not — the
-    # denominator behind "3,266 estimable of 10,352 Casual games". For the
-    # whole catalogue that is simply the catalogue.
+    free_not_estimated = counts.pop(-1, (0, 0.0, 0))[0]
+    total_games = sum(count for count, _, _ in counts.values())
+    estimated_games = sum(estimated for _, _, estimated in counts.values())
+    bottom_count, _, bottom_estimated = counts.get(0, (0, 0.0, 0))
+    unestimated_in_bottom = bottom_count - bottom_estimated
+
+    # How many games carry this genre at all, released or not — the
+    # denominator behind "3,266 of 10,352 Casual games". For the whole
+    # catalogue that is simply the catalogue.
     genre_total = (
         await _count(db)
         if genre is None
@@ -606,9 +631,11 @@ async def _genre_tier_breakdown(
 
     bands: list[GenreRevenueBand] = []
     for index, band in enumerate(REVENUE_BANDS):
-        count, revenue_sum = counts.get(index, (0, 0.0))
+        count, revenue_sum, _ = counts.get(index, (0, 0.0, 0))
         # Everything in this band or any band above it — the comparable number.
-        cumulative = sum(counts.get(i, (0, 0.0))[0] for i in range(index, len(REVENUE_BANDS)))
+        cumulative = sum(
+            counts.get(i, (0, 0.0, 0))[0] for i in range(index, len(REVENUE_BANDS))
+        )
         bands.append(
             GenreRevenueBand(
                 label=band.label,
@@ -625,6 +652,9 @@ async def _genre_tier_breakdown(
     return GenreTierBreakdownOut(
         genre=genre if genre is not None else ALL_GAMES_LABEL,
         total_games=total_games,
+        estimated_games=estimated_games,
+        unestimated_in_bottom=unestimated_in_bottom,
+        free_not_estimated=free_not_estimated,
         genre_total=genre_total,
         catalogue_total=await _count(db),
         method=_method_out(),

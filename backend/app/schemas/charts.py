@@ -174,17 +174,30 @@ class GenreRevenueBand(BaseModel):
 
 
 class GenreTierBreakdownOut(BaseModel):
-    """A single genre split across revenue bands.
+    """Released games split across revenue bands — one genre's, or all of them.
 
-    The denominator is the genre's games that CAN be estimated, not all its
-    games: dividing by a population most of which has too few reviews to
-    judge would report a pass rate that is really a coverage rate.
+    Covers every RELEASED game, not only the ones carrying an estimate.
+    Showing estimable games alone hid 6,605 of 14,192 releases, and they were
+    not a random 6,605: they are overwhelmingly the smallest games in the
+    catalogue, so leaving them out flattered the distribution it was drawn to
+    describe.
+
+    They are not counted as measured zeroes either. A paid game with fewer
+    than ten public reviews has sold a few hundred copies at the outside, so
+    the bottom band is where it belongs — but `unestimated_in_bottom` reports
+    how many of that band got there by inference rather than arithmetic, and
+    `free_not_estimated` keeps free-to-play out of the bands entirely, because
+    their money is in items this project never observes and "under $10K" would
+    be a claim about them, not a gap in the data.
     """
 
     genre: str
-    total_games: int         # games in this genre with a revenue estimate
-    genre_total: int         # games in this genre, estimable or not
+    total_games: int         # released games covered by the bands
+    genre_total: int         # games carrying this genre, released or not
     catalogue_total: int
+    estimated_games: int     # of total_games, how many carry a real estimate
+    unestimated_in_bottom: int  # placed in the bottom band by the review floor
+    free_not_estimated: int  # free-to-play, excluded from the bands entirely
     method: RevenueMethodOut
     bands: list[GenreRevenueBand]
 

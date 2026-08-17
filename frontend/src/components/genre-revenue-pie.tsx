@@ -53,9 +53,18 @@ interface RevenueBand {
 
 interface GenreBreakdown {
   genre: string;
+  /** Released games covered by the bands — including those with no estimate. */
   total_games: number;
   genre_total: number;
   catalogue_total: number;
+  /** Of total_games, how many carry a computed figure. */
+  estimated_games: number;
+  /** In the bottom band because they fall under the estimator's review floor,
+   *  not because a figure was computed for them. */
+  unestimated_in_bottom: number;
+  /** Free-to-play, left out of the bands: their money is in items this
+   *  project never observes. */
+  free_not_estimated: number;
   method: RevenueMethod;
   bands: RevenueBand[];
 }
@@ -294,8 +303,8 @@ function GenreTierView({
   const counter = (
     <div className="flex shrink-0 items-center gap-3 whitespace-nowrap text-xs text-muted">
       <span>
-        {fmtInt(data.total_games)} estimable of {fmtInt(data.genre_total)}{" "}
-        {genre ?? "catalogue"} games
+        {fmtInt(data.total_games)} released · {fmtInt(data.estimated_games)}{" "}
+        estimated
       </span>
       {closeButton}
     </div>
@@ -324,10 +333,30 @@ function GenreTierView({
           <p>
             Slices are <span className="text-ink2">exclusive bands</span>, not
             thresholds: each game sits in exactly one, so they sum to 100% of
-            the {fmtInt(data.total_games)} {genre ?? "catalogue"} games that can be estimated
-            — not all {fmtInt(data.genre_total)} of them. Using the larger
-            number would report a coverage rate dressed up as a success rate.
+            the {fmtInt(data.total_games)} released{" "}
+            {genre ? `${genre} ` : ""}games.
           </p>
+          <p>
+            <span className="text-ink2">
+              {fmtInt(data.unestimated_in_bottom)} of them are in the bottom
+              band without a computed figure.
+            </span>{" "}
+            Nothing is estimated below {data.method.min_reviews} reviews, but a
+            paid game with fewer than that has sold a few hundred copies at the
+            outside, so under $10K is where it belongs. Counting only the{" "}
+            {fmtInt(data.estimated_games)} games that do carry a figure would
+            drop the smallest games in the catalogue and flatter the shape of
+            the whole distribution.
+          </p>
+          {data.free_not_estimated > 0 ? (
+            <p>
+              {fmtInt(data.free_not_estimated)} free-to-play{" "}
+              {genre ? `${genre} ` : ""}games are left out entirely rather than
+              counted as zero. They earn through items this project does not
+              observe, so placing them in any band — including the bottom one —
+              would be a claim about them rather than a gap in the data.
+            </p>
+          ) : null}
           <p>
             Hovering a slice also shows the cumulative share earning at least
             that band&apos;s floor. That is the figure to compare genres on: a
@@ -399,7 +428,10 @@ export function GenreRevenuePie({
   // Which top-level view to show once no genre is open. Held here rather than
   // in the parent because the parent owns only the genre, which is what the
   // Top-genres bars set.
-  const [topLevel, setTopLevel] = useState<"bands" | "mix">("mix");
+  // Bands first: it is the shape of the market — 86% of releases under $10K —
+  // where the genre mix answers the narrower question of who is in the top
+  // slice, and only makes sense once the reader knows how small that slice is.
+  const [topLevel, setTopLevel] = useState<"bands" | "mix">("bands");
   const { data, isLoading, isError } = useQuery({
     queryKey: ["genre-revenue-distribution", tier.min],
     queryFn: () => fetchDistribution(tier.min),
