@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { API_BASE } from "@/lib/api";
 import { fmtInt, fmtMoneyShort } from "@/lib/format";
@@ -119,9 +120,24 @@ function Explanation({
   children?: React.ReactNode;
 }) {
   const c = method.constants;
+  // Collapsed by default. It is the method behind the chart, worth reading
+  // once and worth finding again — but it runs to several paragraphs, and
+  // open by default it pushed the chart it explains off the screen.
+  //
+  // <details> rather than useState: the disclosure triangle, keyboard
+  // handling and open/closed semantics come from the element, and this needs
+  // none of the control that a state hook would buy.
   return (
-    <div className="space-y-2 text-xs leading-relaxed text-muted">
-      <p className="font-medium text-ink2">How this is calculated — {heading}</p>
+    <details className="group space-y-2 text-xs leading-relaxed text-muted">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 font-medium text-ink2 hover:text-ink">
+        <ChevronRight
+          size={13}
+          aria-hidden
+          className="transition-transform group-open:rotate-90"
+        />
+        How this is calculated — {heading}
+      </summary>
+      <div className="space-y-2 pt-1">
       {children}
       <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-grid/30 p-2 font-mono text-[11px] text-ink2">
         {`copies solves  U = reviews × multiplier(U)   × ${c.early_access} if Early Access
@@ -151,7 +167,8 @@ net    = copies × list price × ${c.asp} × ${c.steam_share} × ${c.refunds} ×
           ? ` Calibrated against ${method.calibration_sample} disclosed figures (×${method.calibration_factor}).`
           : " Nothing has been calibrated against real disclosed sales yet, so the absolute error is unmeasured."}
       </p>
-    </div>
+      </div>
+    </details>
   );
 }
 
