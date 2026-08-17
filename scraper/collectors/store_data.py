@@ -32,6 +32,7 @@ from app.models import (
     MarketingInfo,
     MediaAsset,
     MediaType,
+    PriceSnapshot,
     Publisher,
     SteamDeckSupport,
     SyncStage,
@@ -50,7 +51,7 @@ from scraper.collectors.steam_sources import (
     fetch_appdetails,
     fetch_deck_category,
     fetch_demo_release_date,
-    fetch_store_page_tags,
+    fetch_store_page,
     parse_supported_languages,
 )
 from scraper.common.http import SteamClient, make_session
@@ -119,6 +120,29 @@ def _controller_support(details: dict) -> ControllerSupport:
     return ControllerSupport.NONE
 
 
+def _movie_url(movie: dict) -> str | None:
+    """Best playable URL for a store trailer.
+
+    Steam retired the `mp4`/`webm` blocks this payload used to carry; entries
+    now expose `dash_h264`, `dash_av1` and `hls_h264` instead. Reading only the
+    old keys silently dropped every trailer in the catalogue, so both shapes
+    are accepted and the old ones stay first for older cached payloads.
+    """
+    for legacy in ("mp4", "webm"):
+        url = (movie.get(legacy) or {}).get("max")
+        if url:
+            return url
+    for modern in ("dash_h264", "hls_h264", "dash_av1"):
+        url = movie.get(modern)
+        if isinstance(url, str) and url:
+            return url
+        if isinstance(url, dict):  # defensive: Steam has nested these before
+            nested = url.get("max") or url.get("url")
+            if nested:
+                return nested
+    return None
+
+
 def _description_corpus(details: dict) -> str:
     return "\n".join(
         details.get(key) or ""
@@ -153,10 +177,11 @@ async def collect_one(
     # the Indie store tag — discovery admits them via that tag, so deleting
     # them here for a missing genre would silently undo discovery.
     try:
-        tags = await fetch_store_page_tags(page_client, appid)
+        tags, store_flags = await fetch_store_page(page_client, appid)
     except Exception as exc:
-        logger.warning("Store page tags failed for %s: %s", appid, exc)
-        tags = []
+        logger.warning("Store page fetch failed for %s: %s", appid, exc)
+        # None, not False: "we could not look" is not "the flag is absent".
+        tags, store_flags = [], None
 
     genres = details.get("genres") or []
     genre_indie = any(
@@ -232,6 +257,10 @@ async def collect_one(
 
     price = details.get("price_overview") or {}
     current_price = price.get("final")
+    # `initial` is the list price; `final` moves with every sale. Any rule about
+    # how a game is *positioned* (a $2 game is a different product from a $20
+    # one at 90% off) has to read the list price.
+    list_price = price.get("initial")
     launch_price = None
     launch_discount = None
     if (
@@ -261,6 +290,11 @@ async def collect_one(
         "demo_appid": demo_appid,
         "demo_release_date": demo_release_date,
         "is_free": bool(details.get("is_free")),
+        "list_price_cents": list_price,
+        "achievements_count": (details.get("achievements") or {}).get("total"),
+        # NULL when the page could not be read — distinct from a confirmed False.
+        "limited_profile": store_flags.limited_profile if store_flags else None,
+        "ai_disclosure": store_flags.ai_disclosure if store_flags else None,
         "currency": price.get("currency"),
         "current_price_cents": current_price,
         "launch_price_cents": launch_price,
@@ -289,6 +323,21 @@ async def collect_one(
     stmt = pg_insert(Game).values(**values)
     stmt = stmt.on_conflict_do_update(index_elements=[Game.appid], set_=update_values)
     await db.execute(stmt)
+
+    # Append-only price history. The games row above holds only the latest
+    # values; this keeps the series so the average-selling-price factor the
+    # revenue estimator uses can eventually be measured instead of assumed.
+    # Free games are skipped: a permanent 0 is not a price observation.
+    if price:
+        db.add(
+            PriceSnapshot(
+                appid=appid,
+                list_cents=list_price,
+                current_cents=current_price,
+                discount_pct=price.get("discount_percent"),
+                currency=price.get("currency"),
+            )
+        )
 
     # --- companies (Steam gives names only; country stays unknown) ---------
     dev_ids = {}
@@ -377,7 +426,7 @@ async def collect_one(
                 }
             )
     for movie in details.get("movies") or []:
-        url = (movie.get("mp4") or {}).get("max") or (movie.get("webm") or {}).get("max")
+        url = _movie_url(movie)
         if url:
             media_rows.append(
                 {

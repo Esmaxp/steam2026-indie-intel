@@ -59,6 +59,12 @@ async def export_games(
     revenue_status: DataStatus | None = None,
     indie_confidence: IndieConfidence | None = None,
     include_flagged: bool = True,
+    # The export mirrors the table, so every filter the table offers has to
+    # reach it — an export that silently ignores a filter ships the wrong file.
+    effort_class: str | None = None,
+    craft_class: str | None = None,
+    classification: str | None = None,
+    include_limited: bool = True,
     sort: str = "-release_date",
 ) -> Response:
     filters = GameFilters(
@@ -72,7 +78,10 @@ async def export_games(
         min_followers=min_followers, ranked_only=ranked_only,
         max_wishlist_rank=max_wishlist_rank,
         wishlist_status=wishlist_status, revenue_status=revenue_status,
-        indie_confidence=indie_confidence, include_flagged=include_flagged, sort=sort,
+        indie_confidence=indie_confidence, include_flagged=include_flagged,
+        effort_class=effort_class, craft_class=craft_class,
+        classification=classification,
+        include_limited=include_limited, sort=sort,
     )
     query = build_games_query(filters)
     rows = (

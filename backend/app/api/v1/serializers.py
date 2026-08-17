@@ -24,6 +24,11 @@ def _enum_value(value) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
+def _float(value) -> float | None:
+    """Numeric columns arrive as Decimal over asyncpg; None stays None."""
+    return float(value) if value is not None else None
+
+
 def _provenanced(
     value, status, source_name=None, source_url=None, recorded_at=None, spread=None,
     comparator="=", disclosed_on=None,
@@ -68,6 +73,18 @@ def row_to_list_item(row) -> GameListItem:
         engine=_enum_value(game.engine),
         indie_confidence=_enum_value(game.indie_confidence),
         low_quality_signal=game.low_quality_signal,
+        effort_score=game.effort_score,
+        effort_class=game.effort_class,
+        effort_signals=game.effort_signals,
+        craft_score=game.craft_score,
+        craft_class=game.craft_class,
+        traction_score=game.traction_score,
+        traction_class=game.traction_class,
+        traction_status=game.traction_status,
+        classification=game.classification,
+        classification_confidence=game.classification_confidence,
+        limited_profile=game.limited_profile,
+        ai_disclosure=game.ai_disclosure,
         is_free=game.is_free,
         currency=game.currency,
         current_price_cents=game.current_price_cents,
@@ -206,9 +223,16 @@ def build_detail(
                 gross_revenue_usd=(
                     float(r.gross_revenue_usd) if r.gross_revenue_usd is not None else None
                 ),
+                gross_min_usd=_float(r.gross_min_usd),
+                gross_max_usd=_float(r.gross_max_usd),
                 net_revenue_usd=(
                     float(r.net_revenue_usd) if r.net_revenue_usd is not None else None
                 ),
+                net_min_usd=_float(r.net_min_usd),
+                net_max_usd=_float(r.net_max_usd),
+                sales_min=r.sales_min,
+                sales_max=r.sales_max,
+                sources_used=r.sources_used,
                 estimated_sales=r.estimated_sales,
                 estimated_owners_min=r.estimated_owners_min,
                 estimated_owners_max=r.estimated_owners_max,
@@ -226,11 +250,22 @@ def build_detail(
             RevenueEstimateOut(
                 source_name=e.source_name,
                 status=_enum_value(e.status),
+                method=e.method,
                 revenue_usd=float(e.revenue_usd) if e.revenue_usd is not None else None,
+                revenue_min_usd=_float(e.revenue_min_usd),
+                revenue_max_usd=_float(e.revenue_max_usd),
+                net_revenue_usd=_float(e.net_revenue_usd),
+                net_min_usd=_float(e.net_min_usd),
+                net_max_usd=_float(e.net_max_usd),
                 estimated_sales=e.estimated_sales,
+                copies_min=e.copies_min,
+                copies_max=e.copies_max,
                 owners_min=e.owners_min,
                 owners_max=e.owners_max,
                 wishlist_count=e.wishlist_count,
+                formula=e.formula,
+                inputs=e.inputs,
+                confidence=e.confidence,
                 source_url=e.source_url,
                 retrieved_at=e.retrieved_at,
             )

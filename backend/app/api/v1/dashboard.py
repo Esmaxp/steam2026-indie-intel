@@ -1,18 +1,39 @@
+from collections import defaultdict
+from typing import NamedTuple
+
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import DataStatus, Dimension, Game, Genre, game_genres
+from app.models import (
+    DataStatus,
+    Dimension,
+    Game,
+    Genre,
+    RevenueEstimate,
+    RevenueRecord,
+    game_genres,
+)
 from app.schemas.charts import (
     BreakdownPoint,
+    ClassificationRow,
+    ClassificationSummaryOut,
     ChartsOut,
+    GenreBands,
+    GenreRevenueDistributionOut,
+    GenreRevenueSlice,
+    GenreRevenueBand,
+    GenreTierBreakdownOut,
     GenreSuccessOut,
+    GenreSuccessOverviewOut,
+    GenreSuccessSlice,
     MonthPoint,
+    RevenueMethodOut,
     SuccessBandPoint,
 )
 from app.schemas.game import AverageStat, DashboardSummary
-from app.services import success_bands
+from app.services import classification, revenue_estimate, success_bands
 from app.services.games_query import (
     latest_followers_sq,
     latest_rank_sq,
@@ -173,6 +194,196 @@ def _band_case(pr_column):
     )
 
 
+@router.get("/classification-summary", response_model=ClassificationSummaryOut)
+async def classification_summary(
+    db: AsyncSession = Depends(get_db),
+) -> ClassificationSummaryOut:
+    """The whole catalogue split across the effort × traction quadrants.
+
+    Split further by Game.is_released — the same flag the release_status
+    filter and the releases-by-month chart use, so a row's released count
+    equals what `?classification=…&release_status=released` returns.
+    """
+    rows = await db.execute(
+        sa.select(
+            Game.classification,
+            Game.classification_confidence,
+            Game.is_released,
+            sa.func.count(),
+        ).group_by(Game.classification, Game.classification_confidence, Game.is_released)
+    )
+    counts: dict[str, int] = defaultdict(int)
+    released: dict[str, int] = defaultdict(int)
+    upcoming: dict[str, int] = defaultdict(int)
+    by_confidence: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for label, confidence, is_released, count in rows:
+        counts[label] += count
+        (released if is_released else upcoming)[label] += count
+        by_confidence[label][confidence] += count
+    total = sum(counts.values())
+    released_total = sum(released.values())
+    upcoming_total = sum(upcoming.values())
+
+    return ClassificationSummaryOut(
+        total=total,
+        released_total=released_total,
+        upcoming_total=upcoming_total,
+        rows=[
+            ClassificationRow(
+                label=label,
+                count=count,
+                share=round(count / total, 4) if total else 0.0,
+                released_count=released[label],
+                upcoming_count=upcoming[label],
+                total_count=count,
+                # Shares within each subtotal, so the two columns can be read
+                # as distributions in their own right and not only against
+                # the catalogue as a whole.
+                released_share=(
+                    round(released[label] / released_total, 4) if released_total else 0.0
+                ),
+                upcoming_share=(
+                    round(upcoming[label] / upcoming_total, 4) if upcoming_total else 0.0
+                ),
+                highlight=label == classification.HIGH_EFFORT_LOW_TRACTION,
+                by_confidence=dict(sorted(by_confidence[label].items())),
+            )
+            # Biggest first, so the table reads as a distribution; the
+            # highlight flag keeps the overlooked group findable regardless.
+            for label, count in sorted(counts.items(), key=lambda kv: -kv[1])
+        ],
+    )
+
+
+@router.get("/genre-success-overview", response_model=GenreSuccessOverviewOut)
+async def genre_success_overview(
+    limit: int = Query(10, ge=1, le=25, description="how many genres, by catalogue size"),
+    db: AsyncSession = Depends(get_db),
+) -> GenreSuccessOverviewOut:
+    """Every top genre's standing in one response.
+
+    Same ranking as /genre-success, computed once and grouped by genre so the
+    genres can be compared against each other rather than one at a time.
+    """
+    ranked = _ranked_games_sq()
+    band_key = _band_case(ranked.c.pr)
+
+    top_genres = (
+        sa.select(Genre.id)
+        .join(game_genres, game_genres.c.genre_id == Genre.id)
+        # Every catalogued game is Indie by construction — it says nothing.
+        .where(Genre.name != "Indie")
+        .group_by(Genre.id)
+        .order_by(sa.func.count(game_genres.c.appid).desc())
+        .limit(limit)
+        .subquery("top_genres")
+    )
+    rows = await db.execute(
+        sa.select(Genre.name, band_key.label("band"), sa.func.count())
+        .select_from(Game)
+        .join(ranked, ranked.c.appid == Game.appid)
+        .join(game_genres, game_genres.c.appid == Game.appid)
+        .join(Genre, Genre.id == game_genres.c.genre_id)
+        .join(top_genres, top_genres.c.id == Genre.id)
+        .group_by(Genre.name, band_key)
+    )
+
+    counts: dict[str, dict[str, int]] = {}
+    for genre_name, band, count in rows:
+        counts.setdefault(genre_name, {})[band] = count
+
+    genres = []
+    for genre_name, per_band in counts.items():
+        scored = sum(per_band.values())
+        genres.append(
+            GenreBands(
+                genre=genre_name,
+                games_scored=scored,
+                bands=[
+                    SuccessBandPoint(
+                        key=band.key,
+                        label=band.label,
+                        count=per_band.get(band.key, 0),
+                        share=round(per_band.get(band.key, 0) / scored, 4) if scored else 0.0,
+                        baseline_share=success_bands.BASELINE_SHARE[band.key],
+                        min_percentile=band.min_percentile,
+                    )
+                    for band in success_bands.SUCCESS_BANDS
+                ],
+            )
+        )
+    # Best-standing genre first: the ordering people actually want to read.
+    genres.sort(
+        key=lambda g: next(b.share for b in g.bands if b.key == "top_10"), reverse=True
+    )
+
+    # --- who the top-decile games are, by primary genre ---------------------
+    # A game carries several genres, so counting it under each would make the
+    # slices sum well past 100%. Steam's own genre order is stored as
+    # game_genres.rank, so the lowest-ranked genre that is not "Indie" (which
+    # every game here carries) is the primary one.
+    primary = (
+        sa.select(
+            game_genres.c.appid,
+            sa.func.min(game_genres.c.rank).label("rank"),
+        )
+        .join(Genre, Genre.id == game_genres.c.genre_id)
+        .where(Genre.name != "Indie")
+        .group_by(game_genres.c.appid)
+        .subquery("primary_rank")
+    )
+    top_bar = success_bands.SUCCESS_BANDS[1].min_percentile
+    # Both counts live in the same universe — games grouped by primary genre —
+    # so the slice and the rate divide comparable things. Mixing a primary-genre
+    # numerator with an any-genre denominator produced rates that contradicted
+    # the per-genre view (an RPG usually lists Action or Adventure first).
+    rows_by_primary = await db.execute(
+        sa.select(
+            Genre.name,
+            sa.func.count(),
+            sa.func.count().filter(ranked.c.pr >= top_bar),
+        )
+        .select_from(ranked)
+        .join(primary, primary.c.appid == ranked.c.appid)
+        .join(
+            game_genres,
+            sa.and_(
+                game_genres.c.appid == ranked.c.appid,
+                game_genres.c.rank == primary.c.rank,
+            ),
+        )
+        .join(Genre, Genre.id == game_genres.c.genre_id)
+        .group_by(Genre.name)
+    )
+    by_primary = [(name, scored, top) for name, scored, top in rows_by_primary.all()]
+    total_top = sum(top for _, _, top in by_primary)
+    baseline_rate = success_bands.BASELINE_SHARE["top_10"]
+
+    composition = [
+        GenreSuccessSlice(
+            genre=name,
+            count=top,
+            share=round(top / total_top, 4) if total_top else 0.0,
+            scored=scored,
+            rate=round(top / scored, 4) if scored else 0.0,
+            over_index=round((top / scored) / baseline_rate, 2) if scored else 0.0,
+        )
+        for name, scored, top in by_primary
+        if top > 0
+    ]
+    composition.sort(key=lambda s: s.count, reverse=True)
+
+    return GenreSuccessOverviewOut(
+        measure=success_bands.MEASURE,
+        cohort=success_bands.COHORT,
+        method=success_bands.METHOD_NAME,
+        notes=success_bands.NOTES,
+        genres=genres,
+        composition=composition,
+        top_band_label=success_bands.SUCCESS_BANDS[1].label,
+    )
+
+
 @router.get("/genre-success", response_model=GenreSuccessOut)
 async def genre_success(
     genre: str = Query(..., min_length=1, description="Genre name, case-insensitive"),
@@ -232,4 +443,278 @@ async def genre_success(
             )
             for band in success_bands.SUCCESS_BANDS
         ],
+    )
+
+
+# The thresholds the UI offers, in one place so the buttons and the query
+# cannot drift apart. Net revenue, i.e. what reaches the developer.
+REVENUE_TIERS: tuple[tuple[str, float], ...] = (
+    ("All", 0.0),
+    ("$10K+", 10_000.0),
+    ("$50K+", 50_000.0),
+    ("$100K+", 100_000.0),
+    ("$500K+", 500_000.0),
+    ("$1M+", 1_000_000.0),
+)
+
+# Slices thinner than this are folded into "Other" — a pie with forty
+# one-percent wedges communicates nothing.
+OTHER_SLICE_BELOW = 0.02
+OTHER_LABEL = "Other"
+
+
+class _Band(NamedTuple):
+    label: str
+    min_revenue: float
+    max_revenue: float | None
+
+
+# The same boundaries as REVENUE_TIERS, read as intervals instead of floors.
+# Kept adjacent to it so the two can never drift: the per-genre pie's bands
+# and the all-genres pie's thresholds have to describe the same money.
+REVENUE_BANDS: tuple[_Band, ...] = (
+    _Band("Under $10K", 0.0, 10_000.0),
+    _Band("$10K–$50K", 10_000.0, 50_000.0),
+    _Band("$50K–$100K", 50_000.0, 100_000.0),
+    _Band("$100K–$500K", 100_000.0, 500_000.0),
+    _Band("$500K–$1M", 500_000.0, 1_000_000.0),
+    _Band("$1M+", 1_000_000.0, None),
+)
+
+
+def _tier_label(min_revenue: float) -> str:
+    """The closest configured label, so an arbitrary threshold still names itself."""
+    for label, floor in reversed(REVENUE_TIERS):
+        if min_revenue >= floor:
+            return label if floor == min_revenue else f"${min_revenue:,.0f}+"
+    return "All"
+
+
+def _estimable_revenue_sq():
+    """One row per game with a usable net-revenue estimate, latest first.
+
+    revenue_records is append-only, so DISTINCT ON keeps the current summary
+    and drops superseded ones.
+    """
+    return (
+        sa.select(RevenueRecord.appid, RevenueRecord.net_revenue_usd)
+        .distinct(RevenueRecord.appid)
+        .where(RevenueRecord.net_revenue_usd.is_not(None))
+        .order_by(RevenueRecord.appid, RevenueRecord.recorded_at.desc())
+        .subquery("revenue")
+    )
+
+
+def _above_sq(revenue, min_revenue: float, name: str = "above"):
+    return (
+        sa.select(revenue.c.appid, revenue.c.net_revenue_usd)
+        .where(revenue.c.net_revenue_usd >= min_revenue)
+        .subquery(name)
+    )
+
+
+def _method_out() -> RevenueMethodOut:
+    """The arithmetic, read straight off the estimator's own constants.
+
+    Shipped with every response so the UI never keeps a second copy of a
+    number that can change.
+    """
+    return RevenueMethodOut(
+        formula=(
+            "copies solves U = reviews x multiplier(U), x early_access_factor; "
+            "net = copies x list_price x asp x steam_share x refunds x regional"
+        ),
+        constants={
+            "asp": revenue_estimate.ASP_FACTOR,
+            "steam_share": revenue_estimate.STEAM_SHARE,
+            "refunds": revenue_estimate.REFUND_FACTOR,
+            "regional": revenue_estimate.REGIONAL_FACTOR,
+            "net_of_gross": round(revenue_estimate.NET_OF_GROSS, 4),
+            "early_access": revenue_estimate.EARLY_ACCESS_FACTOR,
+        },
+        calibration_factor=revenue_estimate.CALIBRATION_FACTOR,
+        calibration_sample=revenue_estimate.CALIBRATION_SAMPLE,
+        min_reviews=revenue_estimate.MIN_REVIEWS,
+    )
+
+
+async def _genre_tier_breakdown(db: AsyncSession, genre: str) -> GenreTierBreakdownOut:
+    """One genre split into mutually exclusive revenue bands.
+
+    Exclusive rather than cumulative because these are pie slices: cumulative
+    pass-rates are nested ($100K+ games are also $10K+ games) and would sum
+    past 100%. The cumulative figure is still reported per band, because that
+    is the number two genres can be compared on — "46% of RPGs clear $10K vs
+    26% of Casual games" — and the exclusive split alone cannot say it.
+
+    One pass over the genre's rows: a CASE assigns each game its band, so
+    six bands cost one query rather than six.
+    """
+    revenue = _estimable_revenue_sq()
+    net = revenue.c.net_revenue_usd
+    band_index = sa.case(
+        *[
+            (net < REVENUE_BANDS[i].max_revenue, i)
+            for i in range(len(REVENUE_BANDS) - 1)
+        ],
+        else_=len(REVENUE_BANDS) - 1,
+    )
+
+    rows = await db.execute(
+        sa.select(
+            band_index.label("band"),
+            sa.func.count(),
+            sa.func.coalesce(sa.func.sum(net), 0),
+        )
+        .select_from(revenue)
+        .join(game_genres, game_genres.c.appid == revenue.c.appid)
+        .join(Genre, Genre.id == game_genres.c.genre_id)
+        .where(Genre.name == genre)
+        .group_by(band_index)
+    )
+    counts: dict[int, tuple[int, float]] = {
+        int(index): (int(count), float(total)) for index, count, total in rows
+    }
+    total_games = sum(count for count, _ in counts.values())
+
+    genre_total = (
+        await db.execute(
+            sa.select(sa.func.count())
+            .select_from(game_genres)
+            .join(Genre, Genre.id == game_genres.c.genre_id)
+            .where(Genre.name == genre)
+        )
+    ).scalar_one()
+
+    bands: list[GenreRevenueBand] = []
+    for index, band in enumerate(REVENUE_BANDS):
+        count, revenue_sum = counts.get(index, (0, 0.0))
+        # Everything in this band or any band above it — the comparable number.
+        cumulative = sum(counts.get(i, (0, 0.0))[0] for i in range(index, len(REVENUE_BANDS)))
+        bands.append(
+            GenreRevenueBand(
+                label=band.label,
+                min_revenue=band.min_revenue,
+                max_revenue=band.max_revenue,
+                game_count=count,
+                pct=round(count / total_games, 4) if total_games else 0.0,
+                cumulative_count=cumulative,
+                cumulative_pct=round(cumulative / total_games, 4) if total_games else 0.0,
+                total_revenue_mid=round(revenue_sum, 2),
+            )
+        )
+
+    return GenreTierBreakdownOut(
+        genre=genre,
+        total_games=total_games,
+        genre_total=genre_total,
+        catalogue_total=await _count(db),
+        method=_method_out(),
+        bands=bands,
+    )
+
+
+@router.get(
+    "/genre-revenue-distribution",
+    response_model=GenreRevenueDistributionOut | GenreTierBreakdownOut,
+)
+async def genre_revenue_distribution(
+    min_revenue: float = Query(
+        0.0, ge=0, description="net revenue floor in USD; 0 = every estimable game"
+    ),
+    genre: str | None = Query(
+        None,
+        description=(
+            "when given, returns that genre measured at every tier instead of "
+            "the genre mix at one tier; min_revenue is ignored"
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> GenreRevenueDistributionOut | GenreTierBreakdownOut:
+    """Which genres the games above a revenue threshold belong to.
+
+    Estimated net revenue, never a measured one — see
+    app.services.revenue_estimate for how it is derived and how wrong it can
+    be. The response carries the formula and its constants so the reader is
+    not asked to take the number on faith.
+
+    With `genre`, the question flips: one genre, every threshold. The two
+    shapes answer different questions and share a route because they share a
+    card in the UI.
+    """
+    if genre and genre.strip():
+        return await _genre_tier_breakdown(db, genre.strip())
+
+    revenue = _estimable_revenue_sq()
+    above = _above_sq(revenue, min_revenue)
+
+    totals = (
+        await db.execute(
+            sa.select(sa.func.count(), sa.func.coalesce(sa.func.sum(above.c.net_revenue_usd), 0))
+        )
+    ).one()
+    game_count, total_revenue = int(totals[0]), float(totals[1])
+    estimable_total = (
+        await db.execute(sa.select(sa.func.count()).select_from(revenue))
+    ).scalar_one()
+    catalogue_total = await _count(db)
+
+    rows = await db.execute(
+        sa.select(Genre.name, sa.func.count())
+        .select_from(above)
+        .join(game_genres, game_genres.c.appid == above.c.appid)
+        .join(Genre, Genre.id == game_genres.c.genre_id)
+        # Every catalogued game is Indie by construction — the slice would
+        # be the whole pie and would say nothing.
+        .where(Genre.name != "Indie")
+        .group_by(Genre.name)
+        .order_by(sa.func.count().desc())
+    )
+    counts = [(name, count) for name, count in rows]
+    tag_total = sum(count for _, count in counts)
+
+    slices: list[GenreRevenueSlice] = []
+    other = 0
+    for name, count in counts:
+        pct = count / tag_total if tag_total else 0.0
+        if pct < OTHER_SLICE_BELOW:
+            other += count
+        else:
+            slices.append(GenreRevenueSlice(genre=name, count=count, pct=round(pct, 4)))
+    if other:
+        slices.append(
+            GenreRevenueSlice(
+                genre=OTHER_LABEL, count=other, pct=round(other / tag_total, 4)
+            )
+        )
+
+    # Which signals stand behind this tier's games, and how much they disagree.
+    signal_rows = await db.execute(
+        sa.select(RevenueEstimate.source_name, sa.func.count(sa.distinct(RevenueEstimate.appid)))
+        .join(above, above.c.appid == RevenueEstimate.appid)
+        .group_by(RevenueEstimate.source_name)
+    )
+    spread = (
+        await db.execute(
+            sa.select(
+                sa.func.percentile_cont(0.5).within_group(RevenueRecord.estimate_spread)
+            ).join(above, above.c.appid == RevenueRecord.appid)
+        )
+    ).scalar_one()
+
+    return GenreRevenueDistributionOut(
+        tier=_tier_label(min_revenue),
+        min_revenue=min_revenue,
+        game_count=game_count,
+        total_revenue_mid=round(total_revenue, 2),
+        estimable_total=estimable_total,
+        catalogue_total=catalogue_total,
+        share_of_estimable=(
+            round(game_count / estimable_total, 4) if estimable_total else 0.0
+        ),
+        share_of_catalogue=round(game_count / catalogue_total, 4) if catalogue_total else 0.0,
+        sources_used={name: count for name, count in signal_rows},
+        median_spread=round(float(spread), 4) if spread is not None else None,
+        method=_method_out(),
+        genres=slices,
     )

@@ -84,9 +84,13 @@ async def manifest(db: AsyncSession = Depends(get_db)) -> ManifestOut:
                 "Steamworks number."
             ),
             (
-                "No revenue or sales figure exists in this dataset. Steam publishes "
-                "none, and the third-party estimate vendors were retired. Do not "
-                "multiply reviews by anything to produce one."
+                "Revenue and copies ARE estimated, but only as a RANGE, only from "
+                "signals this project measures itself, and always with the formula "
+                "and inputs attached. Quote the band, never its midpoint as a fact, "
+                "and never a figure for a game with fewer than 10 reviews or a "
+                "free-to-play title — neither is estimated at all. Steam still "
+                "publishes no sales number; these are derived and labelled "
+                "`estimated`, which is not the same kind of claim as a review count."
             ),
             (
                 "Outcome is expressed as POSITION among release-month peers, not as "
@@ -127,6 +131,11 @@ async def manifest(db: AsyncSession = Depends(get_db)) -> ManifestOut:
             "score": "The released trending rank: reviews_per_day x quality. Velocity "
             "discounted by reception, so a fast but badly received game does not read as "
             "a success.",
+            "revenue": "A derived RANGE in USD, not a measurement. Solved from review "
+            "count, cross-checked against followers and peak concurrents, with the "
+            "formula and inputs stored alongside. Absent below 10 reviews and for "
+            "free-to-play games. Carries a provenance status like every other "
+            "business metric — read it before quoting the number.",
             "median_price_cents": "Median current price of games in the facet, in cents.",
             "top_decile_share": "Share of the facet's RANKABLE games in the top decile of "
             "their release-month cohort. Denominator excludes unreleased games and games "

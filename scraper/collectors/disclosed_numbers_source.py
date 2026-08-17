@@ -39,7 +39,7 @@ from app.models import (
 )
 from scraper.collectors.budget_cost_tables import MONTHLY_COST_PER_PERSON_USD
 from scraper.collectors.budget_estimator import recompute_budgets
-from scraper.collectors.revenue_merge import merge_estimates
+from scraper.collectors.revenue_merge import merge_estimates, record_values
 
 
 async def apply(args: argparse.Namespace) -> None:
@@ -59,6 +59,13 @@ async def apply(args: argparse.Namespace) -> None:
                     revenue_usd=args.revenue,
                     estimated_sales=args.sales,
                     source_url=args.source_url,
+                    # Most disclosures are round lower bounds ("over 1 million
+                    # copies"), and recording one as an exact figure would
+                    # overstate what was said AND bias any calibration
+                    # downward — the estimator would look high against a floor
+                    # it actually cleared. app.services.revenue_calibration
+                    # reads this key and keeps bounds out of the ratio.
+                    inputs={"comparator": args.comparator},
                 )
             )
             await db.flush()
@@ -76,18 +83,7 @@ async def apply(args: argparse.Namespace) -> None:
             merged = merge_estimates(rows)
             if merged:
                 db.add(
-                    RevenueRecord(
-                        appid=args.appid,
-                        status=merged.status,
-                        gross_revenue_usd=merged.gross_revenue_usd,
-                        estimated_sales=merged.estimated_sales,
-                        estimated_owners_min=merged.owners_min,
-                        estimated_owners_max=merged.owners_max,
-                        estimate_spread=merged.estimate_spread,
-                        source_name=merged.source_name,
-                        source_url=merged.source_url,
-                        notes=merged.notes,
-                    )
+                    RevenueRecord(appid=args.appid, **record_values(merged))
                 )
             print(f"Confirmed revenue recorded for {args.appid}")
 
@@ -142,6 +138,11 @@ def main() -> None:
     parser.add_argument("--appid", type=int, required=True)
     parser.add_argument("--revenue", type=float, help="gross revenue USD")
     parser.add_argument("--sales", type=int, help="units sold")
+    parser.add_argument(
+        "--comparator", choices=("=", ">="), default="=",
+        help="'>=' when the source states a lower bound ('over 1 million'), "
+        "which is how most milestone posts are phrased",
+    )
     parser.add_argument("--wishlist", type=int, help="wishlist count")
     parser.add_argument("--budget", type=float, help="development budget USD")
     parser.add_argument("--team-size", type=int, dest="team_size")

@@ -345,11 +345,31 @@ Disclosures are harvested from official Steam news
 **Confirmed**, so the harvester defaults to a dry-run CSV for review and needs
 `--write` to insert.
 
-Revenue has no first-party source and reports **Unknown** for every game. The
-third-party estimate vendors were retired: across 8,380 collected rows, none
-carried a revenue or sales figure. **SteamCharts** is kept for concurrent
-players and labelled third-party in the UI — it publishes an observed
-measurement rather than a model output.
+Revenue is **estimated by this project, from signals it measures itself** —
+never bought from a vendor. The third-party estimate vendors were retired
+(across 8,380 collected rows, none carried a revenue or sales figure), and
+what replaced them is a first-party estimator with its arithmetic on show:
+
+- **Copies** come from review count via a multiplier chosen by review-count
+  tier (20× under 50 reviews, up to 49× above 1,000), with Early Access
+  ×1.25. Peak concurrent players are recorded alongside as a cross-check
+  that widens the band but does not move the value.
+- **Revenue** = copies × list price × 0.65 (average selling price against
+  list) × 0.70 (Valve) × 0.95 (refunds) × 0.90 (regional pricing and VAT) —
+  about 39% of list price reaching the developer.
+- **Always a band**, never a point value, and no estimate at all below 10
+  reviews: zero reviews times any multiplier is zero, which would read as a
+  measured failure rather than an absence of data.
+
+5,079 of 23,078 games can be estimated; the rest have too few reviews and
+report Unknown, as before. Every stored row carries its formula and the
+exact inputs, so any figure can be redone by hand. The multipliers come from
+published research (GameDiscoverCo/Gamalytic medians) and have **not** been
+validated against disclosed sales for this catalogue yet — see
+`workers/calibrate_revenue.py`.
+
+**SteamCharts** is kept for concurrent players and labelled third-party in
+the UI — it publishes an observed measurement rather than a model output.
 
 ### Genre success breakdown (measured ranking)
 

@@ -79,6 +79,41 @@ class FollowerSnapshot(Base):
     source_url: Mapped[str | None] = mapped_column(Text)
 
 
+class PriceSnapshot(Base):
+    """Append-only list/current price, written whenever appdetails is read.
+
+    Exists to replace an assumption with a measurement. Copies are turned
+    into revenue using an average-selling-price factor — what a game
+    actually sold for across its life, not its list price — and that factor
+    is currently a literature constant. Enough snapshots make it computable:
+    discount depth and how much of the year a game spends on sale are both
+    visible in this series.
+
+    Nothing reads it yet, by design. It costs no extra request (the prices
+    are already in the payload store_data parses) and the history has to
+    start before it can be useful.
+    """
+
+    __tablename__ = "price_snapshots"
+    __table_args__ = (
+        Index("ix_price_snapshots_appid_captured_at", "appid", "captured_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    appid: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("games.appid", ondelete="CASCADE"), nullable=False
+    )
+    captured_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # NULL means the storefront returned no price_overview — free games and
+    # region-locked pages. That is not a price of zero.
+    list_cents: Mapped[int | None] = mapped_column(Integer)
+    current_cents: Mapped[int | None] = mapped_column(Integer)
+    discount_pct: Mapped[int | None] = mapped_column(Integer)
+    currency: Mapped[str | None] = mapped_column(Text)
+
+
 class WishlistRankSweep(Base):
     """One run of the Valve Top-Wishlists sweep.
 

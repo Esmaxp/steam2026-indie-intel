@@ -123,6 +123,22 @@ function HideFlaggedToggle() {
   );
 }
 
+/** include_limited defaults to true server-side; the toggle sets it false. */
+function HideLimitedToggle() {
+  const { searchParams, setParams } = useFilterParams();
+  const active = searchParams.get("include_limited") === "false";
+  return (
+    <Button
+      onClick={() => setParams({ include_limited: active ? null : "false" })}
+      className={active ? "border-accent bg-accent/10 text-accent" : ""}
+      aria-pressed={active}
+      title="Hide games whose Steam profile features are still restricted — Valve's own signal that a game has not cleared its sales and engagement bar"
+    >
+      Hide Steam-limited
+    </Button>
+  );
+}
+
 function ParamToggle({ paramKey, label }: { paramKey: string; label: string }) {
   const { searchParams, setParams } = useFilterParams();
   const active = searchParams.get(paramKey) === "true";
@@ -181,15 +197,34 @@ export function FiltersBar() {
         <ParamToggle paramKey="next_fest" label="Next Fest" />
         <ReleaseStatusControl />
         <ParamToggle paramKey="early_access" label="Early Access" />
+        {/* One question: did somebody actually build this? Reads only
+            production evidence — screenshots, localisation, achievements, a
+            real description — and nothing about marketing, price or release
+            status. That last part matters: the older combined effort score
+            put 60% of its weight on commercial decisions, so a game that was
+            made and then never marketed scored the same as a bulk upload,
+            and free games could barely clear the bar at all.
+
+            It replaces two controls that used to sit here (an effort ×
+            traction crossing and a "Developer effort" tier), both built on
+            that confounded score. The traction axis is a separate question
+            and is not what this filter is for. */}
         <ParamSelect
-          paramKey="indie_confidence"
-          label="Indie confidence"
-          options={["high", "medium", "low"]}
+          paramKey="craft_class"
+          label="Craft level"
+          options={["serious", "mixed", "hobby", "unknown"]}
           optionLabels={(v) =>
-            v === "high" ? "High confidence" : v === "medium" ? "Medium" : "Low (flagged)"
+            v === "serious"
+              ? "Real effort"
+              : v === "mixed"
+                ? "Some effort"
+                : v === "hobby"
+                  ? "Low effort / noise"
+                  : "Not yet assessed"
           }
         />
         <HideFlaggedToggle />
+        <HideLimitedToggle />
         {/* Now a real partition of the catalogue: `confirmed` = a developer
             disclosed a figure, `unknown` = everything else. */}
         <ParamSelect

@@ -76,7 +76,11 @@ class RevenueEstimate(Base):
 
     RevenueRecord remains the primary/summary view; it is now derived from
     these rows (Confirmed wins; otherwise the median of Estimated values,
-    with status=conflicting when sources spread more than 50%)."""
+    with status=conflicting when sources spread more than 50%).
+
+    Since 0017 every estimated row is a RANGE. `estimated_sales` and
+    `revenue_usd` are the MID of that range, so readers written before the
+    range columns existed keep reading the same thing they always did."""
 
     __tablename__ = "revenue_estimates"
 
@@ -84,18 +88,32 @@ class RevenueEstimate(Base):
     appid: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("games.appid", ondelete="CASCADE"), index=True
     )
-    # 'disclosed' only. The vendor values (gamalytic|steamspy|vginsights) are
+    # 'disclosed' plus the first-party estimator signals ('reviews', 'ccu',
+    # 'followers'). The vendor values (gamalytic|steamspy|vginsights) are
     # historical: those collectors were retired when the project moved to
     # first-party signals, and their rows are removed in migration 0013.
     source_name: Mapped[str] = mapped_column(Text)
     status: Mapped[DataStatus] = mapped_column(
         pg_enum(DataStatus, "data_status"), default=DataStatus.ESTIMATED
     )
+    method: Mapped[str | None] = mapped_column(Text)
     revenue_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    revenue_min_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    revenue_max_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    net_revenue_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    net_min_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    net_max_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
     estimated_sales: Mapped[int | None] = mapped_column(BigInteger)
+    copies_min: Mapped[int | None] = mapped_column(BigInteger)
+    copies_max: Mapped[int | None] = mapped_column(BigInteger)
     owners_min: Mapped[int | None] = mapped_column(BigInteger)
     owners_max: Mapped[int | None] = mapped_column(BigInteger)
     wishlist_count: Mapped[int | None] = mapped_column(BigInteger)
+    # The formula as written, and the exact values fed into it — a reader who
+    # disagrees with the result can redo the arithmetic without the code.
+    formula: Mapped[str | None] = mapped_column(Text)
+    inputs: Mapped[dict | None] = mapped_column(JSONB)
+    confidence: Mapped[str | None] = mapped_column(Text)
     source_url: Mapped[str] = mapped_column(Text)
     retrieved_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -115,8 +133,17 @@ class RevenueRecord(Base):
         pg_enum(DataStatus, "data_status"), default=DataStatus.UNKNOWN, index=True
     )
     gross_revenue_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    gross_min_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    gross_max_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
     net_revenue_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    net_min_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    net_max_usd: Mapped[float | None] = mapped_column(Numeric(14, 2))
     estimated_sales: Mapped[int | None] = mapped_column(BigInteger)
+    sales_min: Mapped[int | None] = mapped_column(BigInteger)
+    sales_max: Mapped[int | None] = mapped_column(BigInteger)
+    # How many independent signals produced the summary. 1 means nothing
+    # cross-checked it; the spread column is meaningless at that count.
+    sources_used: Mapped[int | None] = mapped_column(Integer)
     estimated_owners_min: Mapped[int | None] = mapped_column(BigInteger)
     estimated_owners_max: Mapped[int | None] = mapped_column(BigInteger)
     # (max-min)/median across the sources merged into this summary row.

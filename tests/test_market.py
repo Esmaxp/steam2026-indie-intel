@@ -69,13 +69,19 @@ def test_every_design_axis_is_callable():
         assert factory() is not None, name
 
 
-def test_manifest_forbids_the_two_numbers_that_do_not_exist():
-    """Wishlist and revenue estimates are the whole reason this project keeps a
-    provenance model. An agent optimising for a confident answer will invent
-    them unless told not to, in the payload, every time."""
+def test_manifest_states_the_limits_on_the_derived_numbers():
+    """The provenance model is the whole point: an agent optimising for a
+    confident answer will state a derived figure as a fact unless told not to,
+    in the payload, every time.
+
+    Wishlists are never estimated. Revenue IS, since upstream added a
+    first-party estimator — but only as a band, so the rule has to say "quote
+    the band" rather than the older "no revenue figure exists", which the
+    merge made false.
+    """
     rules = " ".join(_manifest_rules()).lower()
     assert "no wishlist count is estimated" in rules
-    assert "no revenue or sales figure" in rules
+    assert "range" in rules and "never its midpoint" in rules
     assert "descriptive, not causal" in rules
 
 

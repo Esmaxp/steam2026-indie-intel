@@ -109,3 +109,108 @@ def test_owners_only_rows_produce_a_summary_without_revenue():
 
 def test_rows_with_no_usable_values_return_none():
     assert merge_estimates([est("a")]) is None
+
+
+# --- bands (0017) ----------------------------------------------------------
+
+def banded(source, low, mid, high, net_mid=None, copies=None):
+    """An estimator row as workers/estimate_revenue.py writes it."""
+    return RevenueEstimate(
+        appid=1, source_name=source, status=DataStatus.ESTIMATED,
+        revenue_usd=mid, revenue_min_usd=low, revenue_max_usd=high,
+        net_revenue_usd=net_mid,
+        net_min_usd=None if net_mid is None else net_mid / 2,
+        net_max_usd=None if net_mid is None else net_mid * 2,
+        estimated_sales=copies, copies_min=None if copies is None else copies // 2,
+        copies_max=None if copies is None else copies * 2,
+        source_url=f"https://{source}.tld/1",
+    )
+
+
+def test_the_merged_band_is_the_widest_any_source_claimed():
+    """Two signals agreeing does not narrow an uncertainty nobody measured."""
+    # Generic names on purpose: this pins merge mechanics, and the set of
+    # level-setting sources is a policy that changes (followers moved into
+    # CROSS_CHECK_SOURCES once the sweep let the two be compared).
+    merged = merge_estimates([
+        banded("a", 800, 1000, 1500),
+        banded("b", 600, 1100, 1300),
+    ])
+    assert (merged.gross_min_usd, merged.gross_max_usd) == (600.0, 1500.0)
+    assert merged.gross_revenue_usd == 1050.0  # median of the mids, unchanged
+
+
+def test_a_source_without_a_band_still_widens_the_span():
+    """A legacy or disclosed row contributes its single value at both ends
+    rather than dropping out of the span entirely."""
+    merged = merge_estimates([banded("reviews", 800, 1000, 1200), est("legacy", revenue=5000.0)])
+    assert merged.gross_max_usd == 5000.0
+
+
+def test_net_and_copies_merge_the_same_way():
+    merged = merge_estimates([
+        banded("a", 800, 1000, 1200, net_mid=400, copies=100),
+        banded("b", 900, 1200, 1400, net_mid=600, copies=200),
+    ])
+    assert merged.net_revenue_usd == 500.0
+    assert (merged.net_min_usd, merged.net_max_usd) == (200.0, 1200.0)
+    assert (merged.sales_min, merged.estimated_sales, merged.sales_max) == (50, 150, 400)
+
+
+def test_sources_used_counts_the_signals_behind_the_summary():
+    assert merge_estimates([banded("reviews", 1, 2, 3)]).sources_used == 1
+    assert merge_estimates([
+        banded("reviews", 1, 2, 3), banded("ccu", 1, 2, 3), banded("followers", 1, 2, 3),
+    ]).sources_used == 3
+
+
+def test_a_cross_check_source_widens_the_band_without_moving_the_value():
+    """CCU is fitted against the review estimator, so averaging it in would
+    add no information about the level — only genre noise."""
+    merged = merge_estimates([
+        banded("reviews", 800, 1000, 1200),
+        banded("ccu", 100, 4000, 9000),
+    ])
+    assert merged.gross_revenue_usd == 1000.0        # reviews alone
+    assert (merged.gross_min_usd, merged.gross_max_usd) == (100.0, 9000.0)
+    assert merged.sources_used == 2
+
+
+def test_a_cross_check_moves_neither_gross_nor_net():
+    """Regression: net was averaged across every source while gross used only
+    the level-setting ones, so the two money columns disagreed about their own
+    method. Palworld reported $440M gross and $940M net from the same row —
+    its 2.1M peak concurrents put the CCU signal at 138M copies, and net (the
+    column the revenue pie filters on) silently took half of that."""
+    merged = merge_estimates([
+        banded("reviews", 800, 1000, 1200, net_mid=600),
+        banded("ccu", 100, 4000, 9000, net_mid=2400),
+    ])
+    assert merged.gross_revenue_usd == 1000.0
+    assert merged.net_revenue_usd == 600.0
+
+
+def test_a_disagreeing_cross_check_shows_in_the_spread_but_not_the_status():
+    merged = merge_estimates([
+        banded("reviews", 800, 1000, 1200),
+        banded("ccu", 100, 4000, 9000),
+    ])
+    assert merged.estimate_spread == 3.0             # (4000-1000)/1000
+    assert merged.status is DataStatus.ESTIMATED     # not a conflict
+
+
+def test_a_cross_check_sets_the_level_when_it_is_all_there_is():
+    """A weak estimate beats refusing to answer for a game we do have data on."""
+    merged = merge_estimates([banded("ccu", 100, 500, 900)])
+    assert merged.gross_revenue_usd == 500.0
+
+
+def test_a_disclosure_reports_no_band_at_all():
+    """Zero-width uncertainty would render as a measured range; None says
+    plainly that this figure was not estimated."""
+    merged = merge_estimates([
+        est("disclosed", revenue=999.0, status=DataStatus.CONFIRMED),
+        banded("reviews", 100, 200, 300),
+    ])
+    assert merged.status is DataStatus.CONFIRMED
+    assert (merged.gross_min_usd, merged.gross_max_usd) == (None, None)

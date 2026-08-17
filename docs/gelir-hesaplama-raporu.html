@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gelir Tahmini — Hesaplama Raporu</title>
+<style>
+  :root {
+    --paper: #f7f8f6;
+    --card: #ffffff;
+    --ink: #1b211d;
+    --ink-2: #4e5a53;
+    --ink-3: #77837c;
+    --rule: #d8ddd7;
+    --rule-soft: #e7ebe6;
+    --measured: #1f6f4f;
+    --assumed: #a8700f;
+    --borrowed: #7d8b83;
+    --wash: #eef1ed;
+    --code-bg: #f0f3ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #141815;
+      --card: #1b201c;
+      --ink: #e7ebe6;
+      --ink-2: #b3bdb6;
+      --ink-3: #8b968f;
+      --rule: #2f3833;
+      --rule-soft: #262e29;
+      --measured: #59b98c;
+      --assumed: #d9a94f;
+      --borrowed: #8b968f;
+      --wash: #1f2521;
+      --code-bg: #1e2420;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #141815;
+    --card: #1b201c;
+    --ink: #e7ebe6;
+    --ink-2: #b3bdb6;
+    --ink-3: #8b968f;
+    --rule: #2f3833;
+    --rule-soft: #262e29;
+    --measured: #59b98c;
+    --assumed: #d9a94f;
+    --borrowed: #8b968f;
+    --wash: #1f2521;
+    --code-bg: #1e2420;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Georgia, "Iowan Old Style", "Source Serif Pro", "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 20px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 47rem; margin: 0 auto; }
+
+  /* ---- masthead ---- */
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 44px;
+  }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(2rem, 5.5vw, 3rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 400;
+    text-wrap: balance;
+    margin: 0 0 20px;
+  }
+  .thesis {
+    font-size: 1.15rem;
+    color: var(--ink-2);
+    margin: 0;
+    max-width: 40rem;
+  }
+  .thesis strong { color: var(--ink); font-weight: 700; }
+
+  /* ---- sections ---- */
+  section { margin: 0 0 56px; }
+  h2 {
+    font-size: 1.45rem;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--rule);
+  }
+  h2 .num {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 0.68em;
+    color: var(--ink-3);
+    margin-right: 0.6em;
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 32px 0 8px;
+  }
+  p { margin: 0 0 16px; }
+  p:last-child { margin-bottom: 0; }
+  .lede { color: var(--ink-2); margin-bottom: 24px; }
+
+  /* ---- the calculation chain ---- */
+  .chain {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 22px 24px;
+    margin: 24px 0;
+    overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.85;
+    font-variant-numeric: tabular-nums;
+    white-space: pre;
+    color: var(--ink);
+  }
+  .chain .op { color: var(--ink-3); }
+  .chain .m  { color: var(--measured); font-weight: 700; }
+  .chain .a  { color: var(--assumed); font-weight: 700; }
+
+  /* ---- provenance rows ---- */
+  .prov { display: flex; flex-direction: column; gap: 2px; margin: 24px 0; }
+  .prov-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 20px;
+    align-items: baseline;
+    padding: 11px 16px;
+    border-left: 3px solid var(--borrowed);
+    background: var(--wash);
+  }
+  .prov-row.is-measured { border-left-color: var(--measured); }
+  .prov-row.is-assumed  { border-left-color: var(--assumed); }
+  .prov-row .label { font-weight: 700; }
+  .prov-row .value {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .prov-row .note {
+    grid-column: 1 / -1;
+    font-size: 0.87em;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    margin: 0 0 18px;
+  }
+  .key span { display: flex; align-items: center; gap: 7px; }
+  .key i {
+    width: 11px; height: 11px; border-radius: 2px;
+    background: var(--borrowed); display: inline-block;
+  }
+  .key .k-m i { background: var(--measured); }
+  .key .k-a i { background: var(--assumed); }
+
+  /* ---- tables ---- */
+  .scroll { overflow-x: auto; margin: 24px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.93rem;
+    font-variant-numeric: tabular-nums;
+  }
+  caption {
+    text-align: left;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-bottom: 10px;
+  }
+  th, td { padding: 9px 14px 9px 0; text-align: left; vertical-align: baseline; }
+  thead th {
+    border-bottom: 1px solid var(--ink);
+    font-weight: 700;
+    font-size: 0.86rem;
+  }
+  tbody tr { border-bottom: 1px solid var(--rule-soft); }
+  tbody tr:last-child { border-bottom: none; }
+  td.n, th.n { text-align: right; padding-right: 0; font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; font-size: 0.88em; }
+  tr.total { border-top: 1px solid var(--ink); font-weight: 700; }
+  tr.total td { padding-top: 11px; }
+
+  /* ---- worked examples ---- */
+  .cases { display: flex; flex-direction: column; gap: 18px; margin: 24px 0; }
+  .case {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 20px 22px;
+  }
+  .case h4 {
+    margin: 0 0 3px;
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+  .case .sub {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 14px;
+  }
+  .steps {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.9;
+    font-variant-numeric: tabular-nums;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--ink-2);
+    margin: 0 0 12px;
+  }
+  .steps b { color: var(--ink); font-weight: 700; }
+  .verdict {
+    font-size: 0.9rem;
+    color: var(--ink-2);
+    border-top: 1px solid var(--rule-soft);
+    padding-top: 11px;
+    margin: 0;
+  }
+
+  /* ---- callout ---- */
+  .callout {
+    border-left: 3px solid var(--assumed);
+    background: var(--wash);
+    padding: 16px 20px;
+    margin: 24px 0;
+    font-size: 0.95rem;
+  }
+  .callout p { margin-bottom: 10px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .head {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--assumed);
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  code {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+
+  ul { margin: 0 0 16px; padding-left: 1.15em; }
+  li { margin-bottom: 7px; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+    font-size: 0.85rem;
+    color: var(--ink-3);
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    line-height: 1.7;
+  }
+
+  @media (max-width: 560px) {
+    body { font-size: 16px; padding: 0 16px 64px; }
+    header.masthead { padding-top: 48px; }
+    .prov-row { grid-template-columns: 1fr; }
+    .prov-row .value { white-space: normal; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Steam 2026 Indie Kataloğu · Metodoloji</p>
+  <h1>Gelir tahmini nasıl hesaplanıyor</h1>
+  <p class="thesis">
+    Steam hiçbir oyunun satışını yayınlamaz. Bu katalogdaki her gelir rakamı
+    çıkarımdır. Bu rapor, o çıkarımın <strong>hangi ölçümlere dayandığını,
+    hangi sabitleri ödünç aldığını ve nerede varsaydığını</strong> adım adım
+    gösterir — böylece rakama katılmayan biri hesabı elle tekrar yapabilir.
+  </p>
+</header>
+
+<section>
+  <h2><span class="num">01</span>Zincirin tamamı</h2>
+  <p class="lede">
+    Dört adım. Her adımda ne ölçüm, ne varsayım olduğu renkle işaretli.
+  </p>
+
+  <div class="key">
+    <span class="k-m"><i></i>Ölçüm</span>
+    <span><i></i>Ödünç sabit</span>
+    <span class="k-a"><i></i>Varsayım</span>
+  </div>
+
+<div class="chain"><span class="m">inceleme sayısı</span>              Steam appreviews API
+   <span class="op">↓</span>  U = inceleme × M(U)      M = çarpan eğrisi, bisection ile çözülür
+<b>kopya sayısı</b>
+   <span class="op">↓</span>  × <span class="m">liste fiyatı</span> × <span class="a">0,65</span>   0,65 = ömür boyu ortalama satış fiyatı
+<b>brüt gelir</b>
+   <span class="op">↓</span>  × 0,70 × 0,95 × 0,90     Steam payı · iadeler · bölgesel fiyat + KDV
+<b>net gelir</b>              geliştiricinin eline geçen
+
+kısayol:  net = kopya × liste fiyatı × 0,389</div>
+
+  <p>
+    Çarpan neden basitçe tablodan okunmuyor: yayımlanmış medyanlar
+    <em>satılan kopyaya</em> göre gruplanmış, ama satış zaten bulmaya
+    çalıştığımız şey. Bu yüzden cevap, <em>kendi çarpanıyla tutarlı olan</em>
+    satış rakamı — yani <code>U = inceleme × M(U)</code> denkleminin çözümü.
+  </p>
+</section>
+
+<section>
+  <h2><span class="num">02</span>Üç gerçek örnek</h2>
+  <p class="lede">
+    Katalogdan üç farklı ölçek. Sayılar veritabanındaki kayıtların aynısı.
+  </p>
+
+  <div class="cases">
+
+    <div class="case">
+      <h4>Caromble!</h4>
+      <p class="sub">77 inceleme · 12,99 $</p>
+      <div class="steps">77 inceleme
+  → çarpan <b>34,86×</b>            (bant: 25,10 – 49,16)
+  → <b>2.684 kopya</b>              (bant: 1.933 – 3.785)
+  → 2.684 × 12,99 × 0,65 = <b>22.662 $</b> brüt
+  → 22.662 × 0,5985      = <b>13.563 $</b> net</div>
+      <p class="verdict">
+        Katalogun tipik oyunu. Medyan oyun 3.159 dolar kazanıyor; bu onun
+        biraz üstünde.
+      </p>
+    </div>
+
+    <div class="case">
+      <h4>The Greatest Penguin Heist of All Time</h4>
+      <p class="sub">2.925 inceleme · 14,99 $</p>
+      <div class="steps">2.925 inceleme
+  → çarpan <b>53,02×</b>            (bant: 38,18 – 74,76)
+  → <b>155.089 kopya</b>            (bant: 111.665 – 218.676)
+  → 155.089 × 14,99 × 0,65 = <b>1.511.110 $</b> brüt
+  → 1.511.110 × 0,5985     = <b>904.399 $</b> net</div>
+      <p class="verdict">
+        Çarpanın 34,86'dan 53,02'ye çıktığına dikkat: büyüyen oyunda alıcı
+        başına inceleme oranı düşüyor.
+      </p>
+    </div>
+
+    <div class="case">
+      <h4>Palworld</h4>
+      <p class="sub">470.364 inceleme · 29,99 $ · en büyük vaka</p>
+      <div class="steps">470.364 inceleme
+  → çarpan <b>48,00×</b>            (bant: 34,56 – 67,68)
+  → <b>22.577.472 kopya</b>         (bant: 16,3 M – 31,8 M)
+  → 22.577.472 × 29,99 × 0,65 = <b>440.113.950 $</b> brüt
+  → 440.113.950 × 0,5985      = <b>263.408.199 $</b> net</div>
+      <p class="verdict">
+        Elimizdeki tek gerçek sınav: Pocketpair 25 milyon+ kopya açıkladı,
+        biz 22,6 milyon diyoruz. Katalogun en büyük oyununda tahminci tutuyor.
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">03</span>Her sayı nereden geliyor</h2>
+  <p class="lede">
+    Hesaba giren on bir değer var. Beşi ölçüm, dördü başkasının yayımladığı
+    sabit, ikisi bizim varsayımımız.
+  </p>
+
+  <div class="key">
+    <span class="k-m"><i></i>Ölçüm</span>
+    <span><i></i>Ödünç sabit</span>
+    <span class="k-a"><i></i>Varsayım</span>
+  </div>
+
+  <div class="prov">
+    <div class="prov-row is-measured">
+      <span class="label">İnceleme sayısı</span>
+      <span class="value">6.018 oyunda</span>
+      <span class="note">Steam'in kendi appreviews API'si. Birincil sinyal.</span>
+    </div>
+    <div class="prov-row is-measured">
+      <span class="label">Liste fiyatı</span>
+      <span class="value">12.564 oyunda</span>
+      <span class="note">appdetails <code>price_overview.initial</code> — indirimli fiyat değil, liste fiyatı.</span>
+    </div>
+    <div class="prov-row is-measured">
+      <span class="label">Zirve eşzamanlı oyuncu</span>
+      <span class="value">1.878 oyunda</span>
+      <span class="note">SteamCharts, tüm zamanların zirvesi. Çapraz kontrol olarak kullanılır.</span>
+    </div>
+    <div class="prov-row is-measured">
+      <span class="label">Takipçi sayısı</span>
+      <span class="value">4.902 oyunda</span>
+      <span class="note">Steam topluluk hub üyeleri. Çıkmamış oyunlarda çalışan tek sinyal.</span>
+    </div>
+    <div class="prov-row is-measured">
+      <span class="label">Early Access / çıkış bayrağı</span>
+      <span class="value">tüm katalog</span>
+      <span class="note">appdetails. EA oyunları satış başına daha az inceleme aldığı için çarpan ×1,25.</span>
+    </div>
+
+    <div class="prov-row">
+      <span class="label">Çarpan eğrisi</span>
+      <span class="value">20× → 59×</span>
+      <span class="note">GameDiscoverCo / Gamalytic'in satılan kopyaya göre yayımladığı medyanlar. Beş çapa noktası, araları logaritmik interpolasyonla bağlı.</span>
+    </div>
+    <div class="prov-row">
+      <span class="label">Steam payı</span>
+      <span class="value">0,70</span>
+      <span class="note">Valve'ın açıkladığı %30 kesinti (10 M$ altı ciro için).</span>
+    </div>
+    <div class="prov-row">
+      <span class="label">İade oranı</span>
+      <span class="value">0,95</span>
+      <span class="note">Sektör geneli ~%5 iade.</span>
+    </div>
+    <div class="prov-row">
+      <span class="label">Bölgesel fiyat + KDV</span>
+      <span class="value">0,90</span>
+      <span class="note">Türkiye, Brezilya, Asya fiyatları ve AB'de fiyata dahil KDV.</span>
+    </div>
+
+    <div class="prov-row is-assumed">
+      <span class="label">Ortalama satış fiyatı (ASP)</span>
+      <span class="value">liste × 0,65</span>
+      <span class="note"><strong>Zincirin en zayıf halkası.</strong> Hiçbir yerde ölçülmedi; "satışların çoğu indirimde olur" varsayımı. Hiç indirime girmeyen oyunda üçte bir düşük, sürekli indirimdekinde yüksek kalıyor. Fiyat anlık görüntüleri biriktikçe ölçüme dönüşecek.</span>
+    </div>
+    <div class="prov-row is-assumed">
+      <span class="label">Çapalar arası eğrinin şekli</span>
+      <span class="value">log-lineer</span>
+      <span class="note">Araştırma yalnızca bant medyanlarını yayımladı; aradaki geçişi kimse ölçmedi. Bu bir düzgünlük varsayımı — ama yerini aldığı basamak fonksiyonundan çok daha zayıf bir iddia, çünkü o "bir inceleme farkı satışı %35 değiştirir" diyordu.</span>
+    </div>
+  </div>
+
+  <div class="callout">
+    <p class="head">Hiç ölçmediğimiz şey</p>
+    <p>
+      Katalogdaki 23.078 oyunun <strong>hiçbirinin gerçek satış rakamı
+      elimizde yok.</strong> Kalibrasyon katsayısı hâlâ 1,0, örneklem 0.
+      Yani zincir içsel olarak tutarlı ama mutlak seviyesi doğrulanmadı.
+    </p>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">04</span>Çarpan neden sabit değil</h2>
+  <p>
+    Çarpan aslında bir oranın tersi: kaç alıcıdan birinin inceleme yazdığının.
+    Sabit olmamasının sebebi oyunun değil, <strong>alıcı kitlesinin</strong>
+    değişmesi.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <caption>Yayımlanmış medyanlar, satılan kopyaya göre</caption>
+      <thead>
+        <tr><th>Satılan kopya</th><th class="n">Çarpan</th><th class="n">İnceleme oranı</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1.000 altı</td><td class="n">20×</td><td class="n">%5,0</td></tr>
+        <tr><td>1.000 – 10.000</td><td class="n">36×</td><td class="n">%2,8</td></tr>
+        <tr><td>10.000 – 50.000</td><td class="n">49×</td><td class="n">%2,0</td></tr>
+        <tr><td>50.000 – 100.000</td><td class="n">59×</td><td class="n">%1,7</td></tr>
+        <tr><td>100.000 üstü</td><td class="n">48×</td><td class="n">%2,1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <ul>
+    <li><strong>Küçük oyunun alıcısı rastgele biri değil.</strong> 300 kopya satan oyunu alanların çoğu geliştiriciyi zaten tanıyor — Discord'undan, wishlist'ten. Yorum yazma eğilimi yüksek bir kitle.</li>
+    <li><strong>Büyük oyun kitlesel alıcıya ulaşıyor.</strong> İndirim, bundle, hediye, algoritma önerisi. Çoğu yorum yazmaz, bir kısmı oyunu hiç açmaz.</li>
+    <li><strong>Geliştirici tek tek rica edebiliyor.</strong> 300 satışta mümkün, 500 binde değil.</li>
+    <li><strong>En tepede oran geri dönüyor</strong> (59× → 48×): popüler oyunda insanlar "konuşmanın parçası olmak için" yorum yazıyor.</li>
+  </ul>
+
+  <p>
+    2019'da Steam oyun kapanınca inceleme sormaya başladı ve bütün oranları
+    aşağı çekti. Eski kaynaklardaki 70–80× rakamları bu yüzden geçersiz —
+    ayrıca onlar <em>owners</em> sayıyordu, yani bedava key'ler ve bundle'lar dahil.
+  </p>
+</section>
+
+<section>
+  <h2><span class="num">05</span>Üç sinyal, tek özet</h2>
+  <p class="lede">
+    Kopya sayısına üç bağımsız yoldan ulaşılıyor. Hepsi aynı anda çalışmıyor.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Sinyal</th><th>Formül</th><th class="n">Kapsam</th><th>Rolü</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>İnceleme</strong></td>
+          <td>U = R × M(U)</td>
+          <td class="n">6.018</td>
+          <td>Seviyeyi belirler</td>
+        </tr>
+        <tr>
+          <td><strong>Takipçi</strong></td>
+          <td>takipçi × 1,2 / 2,0 / 3,0</td>
+          <td class="n">4.902</td>
+          <td>Seviyeyi belirler</td>
+        </tr>
+        <tr>
+          <td><strong>Eşzamanlı oyuncu</strong></td>
+          <td>zirve CCU × 33 / 66 / 130</td>
+          <td class="n">1.878</td>
+          <td>Yalnız çapraz kontrol</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Birleştirme: özet değer, seviyeyi belirleyen sinyallerin <em>medyanı</em>;
+    bant ise <em>en geniş</em> hangi sinyal ne diyorsa o. İki sinyal uyuştu
+    diye bant daraltılmıyor — kimsenin ölçmediği bir güveni ima ederdi.
+  </p>
+
+  <div class="callout">
+    <p class="head">CCU neden seviyeyi belirlemiyor</p>
+    <p>
+      CCU çarpanları bağımsız bir kaynaktan gelmiyor — inceleme tahmincisine
+      göre fit edildiler (1.826 oyunda medyan 65,8 kopya/CCU). Dolayısıyla
+      ikisinin uyuşması bağımsız doğrulama <em>değil.</em> Üstelik eşzamanlılık
+      türe göre 4 kat oynuyor: çok oyunculu oyun şişiyor, kısa anlatı oyunu
+      eziliyor. Palworld bunun ders niteliğinde örneği — 2,1 milyon zirve
+      oyuncusu CCU sinyalini 138 milyon kopyaya çıkarıyor, gerçeğin altı katı.
+      Bu yüzden CCU bandı genişletir ve uyuşmazlık ölçüsüne yansır, ama özet
+      rakamı oynatmaz.
+    </p>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">06</span>Kim tahmin alıyor, kim almıyor</h2>
+
+  <div class="scroll">
+    <table>
+      <caption>Kapılar — hangi durumda hiç sayı üretilmez</caption>
+      <thead>
+        <tr><th>Kural</th><th>Gerekçe</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>10 incelemenin altı</strong></td>
+          <td>3 incelemeli oyunda tek bir inceleme farkı tahmini %33 oynatır. Ayrıca 0 × çarpan = 0 olurdu, ki bu ölçüm gibi görünen bir uydurma olurdu.</td>
+        </tr>
+        <tr>
+          <td><strong>Ücretsiz oyun</strong></td>
+          <td>Geliri eşya ve geçişlerde; bu proje onu hiç gözlemlemiyor. Kopya tahmini verilir, gelir verilmez.</td>
+        </tr>
+        <tr>
+          <td><strong>Liste fiyatı yok</strong></td>
+          <td>Steam çoğu oyunun fiyatını çıkmadan önce yayınlamıyor. Kopya verilir, gelir verilmez.</td>
+        </tr>
+        <tr>
+          <td><strong>20 takipçi altı / 5 CCU altı</strong></td>
+          <td>O sinyal susar; diğerleri varsa onlar konuşur.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <caption>Sonuçta kapsam</caption>
+      <thead>
+        <tr><th>Grup</th><th class="n">Oyun</th><th class="n">Gelir tahmini var</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Çıkmış</td><td class="n">14.168</td><td class="n">5.074</td></tr>
+        <tr><td>Çıkmamış</td><td class="n">8.910</td><td class="n">116</td></tr>
+        <tr class="total"><td>Katalog</td><td class="n">23.078</td><td class="n">5.190</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Tahmin alamayan 17.888 oyunu <strong>"sıfır kazandı" diye okumak
+    yanlış olur</strong> — çoğunun ya 10'dan az incelemesi var ya da henüz
+    çıkmadığı için fiyatı yok. Ölçemiyoruz, yok demiyoruz.
+  </p>
+</section>
+
+<section>
+  <h2><span class="num">07</span>Çıkan tablo</h2>
+  <p class="lede">
+    Tahmin üretilebilen 5.074 çıkmış oyunun net gelir dağılımı.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Net gelir bandı</th><th class="n">Oyun</th><th class="n">Pay</th><th class="n">Toplam net</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1.000 $ altı</td><td class="n">1.378</td><td class="n">%27,2</td><td class="n">0,7 M$</td></tr>
+        <tr><td>1K – 10K</td><td class="n">1.991</td><td class="n">%39,2</td><td class="n">6,9 M$</td></tr>
+        <tr><td>10K – 50K</td><td class="n">815</td><td class="n">%16,1</td><td class="n">18,9 M$</td></tr>
+        <tr><td>50K – 100K</td><td class="n">255</td><td class="n">%5,0</td><td class="n">17,9 M$</td></tr>
+        <tr><td>100K – 500K</td><td class="n">371</td><td class="n">%7,3</td><td class="n">84,2 M$</td></tr>
+        <tr><td>500K – 1M</td><td class="n">110</td><td class="n">%2,2</td><td class="n">77,4 M$</td></tr>
+        <tr><td><strong>1M üstü</strong></td><td class="n">154</td><td class="n">%3,0</td><td class="n">1.497 M$</td></tr>
+        <tr class="total"><td>Toplam</td><td class="n">5.074</td><td class="n">%100</td><td class="n">1.703 M$</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    En üstteki <strong>154 oyun (%3), toplam gelirin %87,9'unu</strong>
+    tutuyor. Alttaki 3.369 oyun (%66,4) hepsi birlikte 7,6 milyon dolar —
+    toplamın binde 4,5'i. Medyan oyun <strong>3.159 dolar</strong> kazanıyor;
+    p99 ise 3,38 milyon. Aradaki fark 1.070 kat.
+  </p>
+</section>
+
+<section>
+  <h2><span class="num">08</span>Sınandı mı</h2>
+  <p class="lede">
+    Üç ayrı kontrol yapıldı. İkisi olumlu, biri olumsuz — ve üçü de rastgele
+    örneklem değil.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Kontrol</th><th class="n">Örneklem</th><th>Sonuç</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Palworld</strong></td>
+          <td class="n">1</td>
+          <td>22,6 M kopya dedik, geliştirici 25 M+ açıkladı. Tuttu.</td>
+        </tr>
+        <tr>
+          <td><strong>Taban testi</strong><br><span style="font-size:0.88em;color:var(--ink-3)">"over N copies" açıklamaları</span></td>
+          <td class="n">77</td>
+          <td>9'unda tahminimiz açıklanan tabanın altında kaldı — o 9'da kesinlikle düşük. (Düzeltme öncesi 16'ydı.)</td>
+        </tr>
+        <tr>
+          <td><strong>Kesin rakamlar</strong><br><span style="font-size:0.88em;color:var(--ink-3)">"N copies sold" açıklamaları</span></td>
+          <td class="n">7</td>
+          <td>Medyan oran 0,20 — yani 5 kat yüksek görünüyoruz.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Son ikisi birbirini yalanlıyor. Sebebi şu: <strong>hangi oyunun ne
+    açıkladığı rastgele değil.</strong> Küçük oyunun geliştiricisi "ilk 1.000
+    satışımız" diye kesin rakam paylaşıyor; hit yapan "1 milyonu geçtik" diye
+    alt sınır paylaşıyor. Kesin rakam kümesi alt uca, alt sınır kümesi üst uca
+    kayık. Ayrıca kesin rakamlar oyunun ilk aylarında açıklanmış, biz bugünkü
+    inceleme sayısıyla karşılaştırıyoruz — eşleşme zaman olarak da bozuk.
+  </p>
+
+  <p>
+    Bu yüzden dürüst özet şu: <strong>büyük oyunlarda tutuyor gibi görünüyor,
+    küçüklerde bilmiyoruz, ve bunu ölçecek temiz veri elimizde yok.</strong>
+  </p>
+</section>
+
+<section>
+  <h2><span class="num">09</span>Bilinen sınırlar</h2>
+  <ul>
+    <li><strong>Mutlak hata ölçülmedi.</strong> Kalibrasyon örneklemi sıfır. Sayılar içsel olarak tutarlı, doğrulukları bilinmiyor.</li>
+    <li><strong>Literatürün kendi aralığı ±2 kat.</strong> Gamalytic dört sinyali harmanlayıp ancak %77 oranında ±%30 tutturabiliyor; bu sistem ondan iyi olamaz.</li>
+    <li><strong>ASP bir varsayım.</strong> İndirim geçmişi biriktiğinde ölçüme dönüşecek; şu an 0,65 sabit.</li>
+    <li><strong>Ağır indirimli ve Çince/Rusça kitleli oyunlarda</strong> gerçek çarpan 100×'ü aşabiliyor — bandın üst ucu bile bunu yakalamaz.</li>
+    <li><strong>Yayıncı payı, platform key satışı ve vergi ikametgâhı görünmüyor</strong> — üçü de gerçek rakamı daha aşağı çeker.</li>
+    <li><strong>Bu sayılar sıralama veya filtreleme için birincil ölçüt olmamalı.</strong> Ölçülmüş kohort-yüzdelik sıralaması o iş için hâlâ daha doğru araç.</li>
+  </ul>
+</section>
+
+<footer>
+  Kaynak kod: backend/app/services/revenue_estimate.py (saf, veritabanısız) ·
+  scraper/collectors/revenue_merge.py (birleştirme) ·
+  workers/estimate_revenue.py (çevrimdışı hesap)<br>
+  Her tahmin satırı kendi formülünü ve girdilerini <code>revenue_estimates.inputs</code>
+  içinde saklar — her rakam elle yeniden türetilebilir.<br>
+  215 test geçiyor · Kalibrasyon katsayısı 1,0 (örneklem 0) · 15 Ağustos 2026
+</footer>
+
+</div>
+</body>
+</html>

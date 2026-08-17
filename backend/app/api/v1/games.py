@@ -97,6 +97,31 @@ async def list_games(
     include_flagged: bool = Query(
         True, description="False hides games with the mass-publishing flag"
     ),
+    effort_class: str | None = Query(
+        None,
+        pattern="^(serious|mixed|hobby|unknown)$",
+        description="production effort the store page evidences — independent "
+        "of whether the game sold",
+    ),
+    craft_class: str | None = Query(
+        None,
+        pattern="^(serious|mixed|hobby|unknown)$",
+        description="production evidence only — screenshots, localisation, "
+        "achievements, description. Blind to marketing, price and release "
+        "status, so it is fair to free and unreleased games",
+    ),
+    classification: str | None = Query(
+        None,
+        pattern="^(HIGH_EFFORT_HIGH_TRACTION|HIGH_EFFORT_LOW_TRACTION|"
+        "LOW_EFFORT_HIGH_TRACTION|LOW_EFFORT_LOW_TRACTION|INSUFFICIENT_DATA)$",
+        description="the two axes crossed; HIGH_EFFORT_LOW_TRACTION is the "
+        "serious-but-overlooked group",
+    ),
+    include_limited: bool = Query(
+        True,
+        description="False hides games whose Steam profile features are still "
+        "restricted ('Steam is learning about this game')",
+    ),
     sort: str = Query(
         "-release_date",
         description="column name, '-' prefix = descending; one of: appid, name, "
@@ -119,7 +144,10 @@ async def list_games(
         min_followers=min_followers, ranked_only=ranked_only,
         max_wishlist_rank=max_wishlist_rank,
         wishlist_status=wishlist_status, revenue_status=revenue_status,
-        indie_confidence=indie_confidence, include_flagged=include_flagged, sort=sort,
+        indie_confidence=indie_confidence, include_flagged=include_flagged,
+        effort_class=effort_class, craft_class=craft_class,
+        classification=classification,
+        include_limited=include_limited, sort=sort,
     )
     query = build_games_query(filters)
 

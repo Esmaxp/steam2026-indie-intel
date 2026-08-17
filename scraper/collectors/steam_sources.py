@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import re
+from dataclasses import dataclass
 
 from scraper.common.http import SteamClient
 from scraper.discovery.release_date import parse_release
@@ -23,6 +24,37 @@ AGE_GATE_COOKIES = {
 
 _TAG_MODAL_RE = re.compile(r"InitAppTagModal\(\s*\d+\s*,\s*(\[.*?\])\s*,", re.S)
 
+# Valve restricts store-profile features (cards, achievements showcase) until a
+# game clears an internal sales-and-engagement bar, and says so on the page.
+# The phrasing is Valve's own; keep both wordings — the banner has been worded
+# either way and only one appears at a time.
+_LIMITED_PROFILE_MARKERS = (
+    "Steam is learning about this game",
+    "Profile Features Limited",
+)
+# Mandatory since January 2024 for games built with generative AI. Recorded,
+# never scored: it appears on heavily-reviewed successes too.
+_AI_DISCLOSURE_MARKERS = (
+    "AI Generated Content Disclosure",
+    "ai_content_disclosure",
+)
+
+
+@dataclass(frozen=True)
+class StoreFlags:
+    """Signals Valve prints on the store page but omits from appdetails."""
+
+    limited_profile: bool
+    ai_disclosure: bool
+
+
+def parse_store_flags(html: str) -> StoreFlags:
+    """Pure over the page HTML — unit-testable with no network."""
+    return StoreFlags(
+        limited_profile=any(marker in html for marker in _LIMITED_PROFILE_MARKERS),
+        ai_disclosure=any(marker in html for marker in _AI_DISCLOSURE_MARKERS),
+    )
+
 
 async def fetch_appdetails(client: SteamClient, appid: int) -> dict | None:
     data = await client.get_json(
@@ -34,9 +66,25 @@ async def fetch_appdetails(client: SteamClient, appid: int) -> dict | None:
     return entry["data"]
 
 
+async def fetch_store_page(
+    client: SteamClient, appid: int
+) -> tuple[list[tuple[str, int]], StoreFlags]:
+    """One page fetch, both things it carries: tags and the profile flags.
+
+    The collector already downloaded this HTML for the tag votes, so reading
+    the flags out of it costs nothing extra.
+    """
+    html = await client.get_text(STORE_PAGE_URL.format(appid=appid), params={"l": "english"})
+    return _parse_tags(html, appid), parse_store_flags(html)
+
+
 async def fetch_store_page_tags(client: SteamClient, appid: int) -> list[tuple[str, int]]:
     """User-defined tags with vote counts, parsed from the store page JS blob."""
     html = await client.get_text(STORE_PAGE_URL.format(appid=appid), params={"l": "english"})
+    return _parse_tags(html, appid)
+
+
+def _parse_tags(html: str, appid: int) -> list[tuple[str, int]]:
     match = _TAG_MODAL_RE.search(html)
     if not match:
         logger.debug("No tag modal found for appid %s", appid)

@@ -52,6 +52,30 @@ export interface GameListItem {
   engine: string;
   indie_confidence: "high" | "medium" | "low";
   low_quality_signal: boolean;
+  /** Axis 1: production effort the store page evidences (0-100) — not sales. */
+  effort_score: number | null;
+  effort_class: "serious" | "mixed" | "hobby" | "unknown";
+  /** Which signals earned the score, and what each was worth. */
+  effort_signals: { score: number; signals: Record<string, number> } | null;
+  /** The production-only view of those same signals: no marketing, no price,
+   *  no release status. What the "Craft level" filter reads. */
+  craft_score: number | null;
+  craft_class: "serious" | "mixed" | "hobby" | "unknown";
+  /** Axis 2: what players did. traction_status says why a score is absent. */
+  traction_score: number | null;
+  traction_class: "strong" | "modest" | "weak" | "unknown";
+  traction_status: string;
+  /** The two axes crossed; HIGH_EFFORT_LOW_TRACTION is the overlooked group. */
+  classification:
+    | "HIGH_EFFORT_HIGH_TRACTION"
+    | "HIGH_EFFORT_LOW_TRACTION"
+    | "LOW_EFFORT_HIGH_TRACTION"
+    | "LOW_EFFORT_LOW_TRACTION"
+    | "INSUFFICIENT_DATA";
+  classification_confidence: "high" | "medium" | "low";
+  /** null = store page not read yet, which is not the same as "unrestricted". */
+  limited_profile: boolean | null;
+  ai_disclosure: boolean | null;
   is_free: boolean;
   currency: string | null;
   current_price_cents: number | null;
