@@ -381,11 +381,21 @@ def build_games_query(f: GameFilters) -> GamesQuery:
         "reviews": ls.c.total_reviews,
         "positive_pct": ls.c.positive_pct,
         "peak_ccu": ls.c.peak_ccu,
-        # No `wishlist` or `revenue` sort key. Both columns end up all-NULL:
-        # wishlist carries only developer disclosures (mostly ">=" lower
-        # bounds, which do not order meaningfully), and migration 0013 deletes
-        # every vendor revenue row — the retired SteamSpy rows carried 0
-        # revenue values across 8,380 rows anyway.
+        # Sorts the same figure the column displays — gross, not net. The two
+        # order differently: net divides by a per-game price, so a cheap
+        # high-volume game and an expensive low-volume one can swap places
+        # between them, and a table sorted on a number it is not showing reads
+        # as broken.
+        #
+        # NULL for the ~2/3 of the catalogue with no estimate (nothing is
+        # estimated below 10 reviews, or for free-to-play), and nulls_last
+        # below keeps those out of the way in both directions rather than
+        # letting "cheapest first" open on 15,000 blanks.
+        "revenue": lr.c.gross_revenue_usd,
+        "copies": lr.c.estimated_sales,
+        # Still no `wishlist` key: that column carries only developer
+        # disclosures, and they are mostly ">=" lower bounds, which do not
+        # order against each other meaningfully.
         "followers": lf.c.followers,
         "follower_delta_14d": follower_delta,
         # NB: ascending is BETTER for rank (1 is the top of the chart), unlike

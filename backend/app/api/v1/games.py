@@ -126,8 +126,10 @@ async def list_games(
         "-release_date",
         description="column name, '-' prefix = descending; one of: appid, name, "
         "release_date, price, reviews, positive_pct, peak_ccu, videos, "
-        "followers, follower_delta_14d, wishlist_rank, rank_delta_7d. NOTE: "
-        "wishlist_rank sorts ascending-is-better (rank 1 is the top of the chart)",
+        "followers, follower_delta_14d, wishlist_rank, rank_delta_7d, revenue, "
+        "copies. NOTE: wishlist_rank sorts ascending-is-better (rank 1 is the "
+        "top of the chart). `revenue` orders on the ESTIMATED gross figure and "
+        "is null for the ~2/3 of games with no estimate.",
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),

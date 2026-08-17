@@ -123,14 +123,19 @@ const DEFAULT_COLUMN_VISIBILITY: VisibilityState = {
 const VISIBILITY_STORAGE_KEY = "steam2026.games-table.columns.v2";
 
 /** Columns whose header click drives server-side sorting.
- *  No wishlist or revenue key: both are all-NULL columns, and disclosed
- *  wishlist figures are mostly ">=" bounds that do not order meaningfully. */
+ *
+ *  Still no wishlist key: that column carries only developer disclosures, and
+ *  they are mostly ">=" lower bounds, which do not order against each other
+ *  meaningfully. Revenue used to be excluded for the same reason it was
+ *  unsortable server-side — the column was empty — and is sortable now that
+ *  the estimator fills it. */
 const SORTABLE: Record<string, string> = {
   name: "name",
   release_date: "release_date",
   total_reviews: "reviews",
   positive_pct: "positive_pct",
   peak_ccu: "peak_ccu",
+  revenue: "revenue",
   followers: "followers",
   follower_delta_14d: "follower_delta_14d",
   wishlist_rank: "wishlist_rank",
