@@ -8,6 +8,10 @@ unless the payload says otherwise, so what is tested here is mostly whether it
 still says otherwise.
 """
 
+import pytest
+from fastapi import HTTPException
+
+from app.api.v1 import dashboard
 from app.api.v1 import market as market_api
 from app.services import market
 from workers import scheduler
@@ -208,3 +212,48 @@ def test_the_scheduler_can_run_every_kind_it_accepts():
     source = inspect.getsource(scheduler._run)
     for kind in ("rank", "disclosures"):
         assert f'kind == "{kind}"' in source, kind
+
+
+# --- revenue band editing -------------------------------------------------
+#
+# A band set is sent as ascending floors rather than labelled intervals,
+# because floors cannot express the malformed sets intervals can: overlapping,
+# gapped, or out of order. What is left to validate is the ordering itself.
+
+
+def test_floors_become_labelled_bands():
+    bands = dashboard.bands_from_floors([0, 10_000, 1_000_000])
+    assert [b.label for b in bands] == ["Under $10K", "$10K–$1M", "$1M+"]
+    assert bands[-1].max_revenue is None  # the top band is open
+
+
+def test_money_labels_stay_short_without_losing_precision():
+    assert dashboard._money_label(500) == "$500"
+    assert dashboard._money_label(10_000) == "$10K"
+    assert dashboard._money_label(1_500_000) == "$1.5M"
+
+
+def test_a_band_set_that_does_not_start_at_zero_is_refused():
+    """Starting at $5K would drop every game below it out of the chart
+    silently — the pie would still add to 100% and be wrong."""
+    with pytest.raises(HTTPException) as caught:
+        dashboard.parse_band_floors("5000,10000")
+    assert "must be 0" in caught.value.detail
+
+
+def test_unordered_or_repeated_floors_are_refused_not_repaired():
+    """Sorting them for the caller would draw a chart they did not ask for and
+    could not tell apart from the one they did."""
+    for bad in ("0,50000,10000", "0,10000,10000"):
+        with pytest.raises(HTTPException):
+            dashboard.parse_band_floors(bad)
+
+
+def test_one_band_is_not_a_pie():
+    with pytest.raises(HTTPException):
+        dashboard.parse_band_floors("0")
+
+
+def test_no_floors_means_the_default_set():
+    assert dashboard.parse_band_floors(None) == dashboard.REVENUE_BANDS
+    assert dashboard.parse_band_floors("") == dashboard.REVENUE_BANDS

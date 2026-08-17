@@ -1,4 +1,6 @@
 from collections import defaultdict
+import itertools
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import sqlalchemy as sa
@@ -482,6 +484,65 @@ REVENUE_BANDS: tuple[_Band, ...] = (
 )
 
 
+# A band set is fully described by its ascending floors: consecutive pairs
+# become the closed bands and the last floor opens the top one. Callers send
+# floors rather than labelled intervals so a malformed set — overlapping,
+# unordered, gapped — cannot be expressed in the first place.
+MAX_BANDS = 10
+
+
+def _money_label(value: float) -> str:
+    """$500, $10K, $1.5M — the shortest form that stays exact."""
+    if value >= 1_000_000:
+        scaled, suffix = value / 1_000_000, "M"
+    elif value >= 1_000:
+        scaled, suffix = value / 1_000, "K"
+    else:
+        return f"${value:,.0f}"
+    text = f"{scaled:.1f}".rstrip("0").rstrip(".")
+    return f"${text}{suffix}"
+
+
+def bands_from_floors(floors: Sequence[float]) -> tuple[_Band, ...]:
+    """Ascending floors -> labelled bands, labelling them the way a reader
+    would: 'Under $10K' for the first, '$1M+' for the last, ranges between."""
+    bands: list[_Band] = []
+    for index, floor in enumerate(floors):
+        ceiling = floors[index + 1] if index + 1 < len(floors) else None
+        if ceiling is None:
+            label = f"{_money_label(floor)}+"
+        elif index == 0 and floor == 0:
+            label = f"Under {_money_label(ceiling)}"
+        else:
+            label = f"{_money_label(floor)}–{_money_label(ceiling)}"
+        bands.append(_Band(label, floor, ceiling))
+    return tuple(bands)
+
+
+def parse_band_floors(raw: str | None) -> tuple[_Band, ...]:
+    """Turn a `floors=0,10000,1000000` parameter into bands.
+
+    Rejects rather than repairs: a silently reordered or de-duplicated set
+    would draw a chart the caller did not ask for and could not tell apart
+    from the one they did.
+    """
+    if not raw or not raw.strip():
+        return REVENUE_BANDS
+    try:
+        floors = [float(part) for part in raw.split(",") if part.strip()]
+    except ValueError:
+        raise HTTPException(422, "floors must be numbers separated by commas") from None
+    if len(floors) < 2:
+        raise HTTPException(422, "give at least two floors — one band cannot be a pie")
+    if len(floors) > MAX_BANDS:
+        raise HTTPException(422, f"at most {MAX_BANDS} bands")
+    if floors[0] != 0:
+        raise HTTPException(422, "the first floor must be 0, or games below it vanish")
+    if any(b <= a for a, b in itertools.pairwise(floors)):
+        raise HTTPException(422, "floors must ascend and not repeat")
+    return bands_from_floors(floors)
+
+
 def _tier_label(min_revenue: float) -> str:
     """The closest configured label, so an arbitrary threshold still names itself."""
     for label, floor in reversed(REVENUE_TIERS):
@@ -542,7 +603,7 @@ ALL_GAMES_LABEL = "All games"
 
 
 async def _genre_tier_breakdown(
-    db: AsyncSession, genre: str | None
+    db: AsyncSession, genre: str | None, bands_def: tuple[_Band, ...] = REVENUE_BANDS
 ) -> GenreTierBreakdownOut:
     """One genre split into mutually exclusive revenue bands — or, with
     `genre=None`, the whole estimable catalogue split the same way.
@@ -578,10 +639,10 @@ async def _genre_tier_breakdown(
         # band is right even though the figure is not computed.
         (net.is_(None), 0),
         *[
-            (net < REVENUE_BANDS[i].max_revenue, i)
-            for i in range(len(REVENUE_BANDS) - 1)
+            (net < bands_def[i].max_revenue, i)
+            for i in range(len(bands_def) - 1)
         ],
-        else_=len(REVENUE_BANDS) - 1,
+        else_=len(bands_def) - 1,
     )
 
     stmt = (
@@ -630,11 +691,11 @@ async def _genre_tier_breakdown(
     )
 
     bands: list[GenreRevenueBand] = []
-    for index, band in enumerate(REVENUE_BANDS):
+    for index, band in enumerate(bands_def):
         count, revenue_sum, _ = counts.get(index, (0, 0.0, 0))
         # Everything in this band or any band above it — the comparable number.
         cumulative = sum(
-            counts.get(i, (0, 0.0, 0))[0] for i in range(index, len(REVENUE_BANDS))
+            counts.get(i, (0, 0.0, 0))[0] for i in range(index, len(bands_def))
         )
         bands.append(
             GenreRevenueBand(
@@ -677,6 +738,14 @@ async def genre_revenue_distribution(
             "the genre mix at one tier; min_revenue is ignored"
         ),
     ),
+    floors: str | None = Query(
+        None,
+        description=(
+            "custom band edges as ascending comma-separated USD floors, e.g. "
+            "'0,25000,250000'. The first must be 0 and the last opens the top "
+            f"band. Up to {MAX_BANDS}. Omit for the default six."
+        ),
+    ),
     bands: bool = Query(
         False,
         description=(
@@ -699,9 +768,9 @@ async def genre_revenue_distribution(
     card in the UI.
     """
     if genre and genre.strip():
-        return await _genre_tier_breakdown(db, genre.strip())
+        return await _genre_tier_breakdown(db, genre.strip(), parse_band_floors(floors))
     if bands:
-        return await _genre_tier_breakdown(db, None)
+        return await _genre_tier_breakdown(db, None, parse_band_floors(floors))
 
     revenue = _estimable_revenue_sq()
     above = _above_sq(revenue, min_revenue)

@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, SlidersHorizontal } from "lucide-react";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { API_BASE } from "@/lib/api";
 import { fmtInt, fmtMoneyShort } from "@/lib/format";
 import { tooltipStyles, useChartTokens } from "@/hooks/use-chart-tokens";
 import { ChartCard } from "@/components/chart-card";
+import {
+  DEFAULT_FLOORS,
+  RevenueBandEditor,
+  loadFloors,
+} from "@/components/revenue-band-editor";
 
 interface GenreSlice {
   genre: string;
@@ -97,10 +102,14 @@ async function fetchDistribution(minRevenue: number): Promise<Distribution> {
 
 /** `null` asks for the whole estimable catalogue rather than one genre — the
  *  baseline a genre's bands are read against. */
-async function fetchGenreBreakdown(genre: string | null): Promise<GenreBreakdown> {
+async function fetchGenreBreakdown(
+  genre: string | null,
+  floors: number[],
+): Promise<GenreBreakdown> {
   const query = genre ? `genre=${encodeURIComponent(genre)}` : "bands=true";
+  const custom = `&floors=${floors.join(",")}`;
   const res = await fetch(
-    `${API_BASE}/api/v1/dashboard/genre-revenue-distribution?${query}`,
+    `${API_BASE}/api/v1/dashboard/genre-revenue-distribution?${query}${custom}`,
   );
   if (!res.ok) throw new Error("revenue band breakdown fetch failed");
   return res.json();
@@ -256,19 +265,27 @@ function GenreTierView({
   palette,
   onClose,
   selector,
+  floors,
+  onEditBands,
 }: {
   genre: string | null;
   palette: string[];
   onClose: () => void;
   selector: React.ReactNode;
+  floors: number[];
+  onEditBands: () => void;
 }) {
+  // Which bands are hidden, by label. Labels rather than indices: editing the
+  // band set renames and renumbers everything, and an index would then hide
+  // whichever band happened to inherit the position.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   // Reads the tokens rather than taking two of them as props: the tooltip
   // needs a foreground colour as well, and threading a third through would
   // just move the problem.
   const tokens = useChartTokens();
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["genre-tier-breakdown", genre ?? "__all__"],
-    queryFn: () => fetchGenreBreakdown(genre),
+    queryKey: ["genre-tier-breakdown", genre ?? "__all__", floors.join(",")],
+    queryFn: () => fetchGenreBreakdown(genre, floors),
   });
 
   const title = selector;
@@ -322,13 +339,72 @@ function GenreTierView({
     );
   }
 
-  const slices = data.bands.filter((b) => b.game_count > 0);
+  const populated = data.bands.filter((b) => b.game_count > 0);
+  const slices = populated.filter((b) => !hidden.has(b.label));
+  const toggle = (label: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      // Refuse to hide the last visible band — an empty pie is not a view of
+      // anything, and the way back would be a legend with nothing in it.
+      else if (slices.length > 1) next.add(label);
+      return next;
+    });
 
   return (
     <ChartCard
       title={title}
       action={counter}
       footer={
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            {populated.map((band) => {
+              const off = hidden.has(band.label);
+              return (
+                <button
+                  key={band.label}
+                  onClick={() => toggle(band.label)}
+                  aria-pressed={!off}
+                  title={
+                    off
+                      ? `Show ${band.label}`
+                      : `Hide ${band.label} — ${fmtInt(band.game_count)} games`
+                  }
+                  className={`flex items-center gap-1.5 ${
+                    off ? "text-muted line-through opacity-60" : "text-ink2"
+                  } hover:text-ink`}
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{
+                      background: off
+                        ? tokens.muted
+                        : palette[data.bands.indexOf(band) % palette.length],
+                    }}
+                  />
+                  {band.label}
+                </button>
+              );
+            })}
+            <button
+              onClick={onEditBands}
+              className="ml-auto flex items-center gap-1 text-muted hover:text-ink"
+            >
+              <SlidersHorizontal size={12} aria-hidden /> Edit bands
+            </button>
+          </div>
+          {hidden.size > 0 ? (
+            <p className="mb-2 text-xs text-muted">
+              {/* The wedges re-fill the circle when a band is hidden, so the
+                  visual is relative to what is shown while every number
+                  quoted stays relative to the whole. Saying so is cheaper
+                  than a chart that silently changes what 100% means. */}
+              {hidden.size} band{hidden.size > 1 ? "s" : ""} hidden — wedges are
+              drawn across the bands shown, while the percentages below and in
+              the tooltip stay out of all {fmtInt(data.total_games)} released
+              games.
+            </p>
+          ) : null}
         <Explanation heading={data.genre} method={data.method}>
           <p>
             Slices are <span className="text-ink2">exclusive bands</span>, not
@@ -367,6 +443,7 @@ function GenreTierView({
             &quot; can be held against any other genre.
           </p>
         </Explanation>
+        </>
       }
     >
       <ResponsiveContainer width="100%" height="100%">
@@ -409,7 +486,8 @@ function GenreTierView({
               read as one card rather than two designs. It replaces the tier
               buttons here: with every band on screen there is nothing left
               for a threshold selector to select. */}
-          <Legend wrapperStyle={{ fontSize: 12 }} />
+          {/* Recharts' own legend only lists what it was given, so a hidden
+              band would disappear along with the control that unhides it. */}
         </PieChart>
       </ResponsiveContainer>
     </ChartCard>
@@ -432,6 +510,11 @@ export function GenreRevenuePie({
   // where the genre mix answers the narrower question of who is in the top
   // slice, and only makes sense once the reader knows how small that slice is.
   const [topLevel, setTopLevel] = useState<"bands" | "mix">("bands");
+  // Read once on mount, not during render: localStorage does not exist on the
+  // server, and reading it while rendering would make the markup differ.
+  const [floors, setFloors] = useState<number[]>(DEFAULT_FLOORS);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => setFloors(loadFloors()), []);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["genre-revenue-distribution", tier.min],
     queryFn: () => fetchDistribution(tier.min),
@@ -483,12 +566,23 @@ export function GenreRevenuePie({
   // rather than opening a second one beside it.
   if (genre || topLevel === "bands") {
     return (
-      <GenreTierView
-        genre={genre}
-        palette={palette}
-        onClose={onClose ?? (() => undefined)}
-        selector={selector}
-      />
+      <>
+        <GenreTierView
+          genre={genre}
+          palette={palette}
+          onClose={onClose ?? (() => undefined)}
+          selector={selector}
+          floors={floors}
+          onEditBands={() => setEditing(true)}
+        />
+        {editing ? (
+          <RevenueBandEditor
+            floors={floors}
+            onApply={setFloors}
+            onClose={() => setEditing(false)}
+          />
+        ) : null}
+      </>
     );
   }
 
